@@ -114,7 +114,7 @@ jobs:
           go build -v -trimpath \
             -ldflags="-X main.version=${VERSION} -X main.date=${BUILD_DATE} -X main.commit=${GIT_COMMIT}" \
             -o git-herd \
-            .
+            ./cmd/git-herd
 
       - name: Verify binary
         run: |

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"testing"
@@ -266,8 +265,9 @@ found in the specified directory and its subdirectories.`,
 
 			// Add timeout if specified
 			if cfg.Timeout > 0 {
-				ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
-				defer cancel()
+				var timeoutCancel context.CancelFunc
+				ctx, timeoutCancel = context.WithTimeout(ctx, cfg.Timeout)
+				defer timeoutCancel()
 			}
 
 			// Determine root path
@@ -437,29 +437,4 @@ func BenchmarkRootCommandCreation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = createRootCommand(cfg)
 	}
-}
-
-// Helper function to capture output
-func captureOutput(f func()) (string, error) {
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		return "", err
-	}
-
-	os.Stdout = w
-
-	f()
-
-	if err := w.Close(); err != nil {
-		return "", err
-	}
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		return "", err
-	}
-
-	return buf.String(), nil
 }

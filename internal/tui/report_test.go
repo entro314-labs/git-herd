@@ -22,8 +22,14 @@ func TestSaveReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
+	defer func() {
+		if err := os.Remove(tmpFile.Name()); err != nil {
+			t.Logf("Failed to remove temp file: %v", err)
+		}
+	}()
 
 	cfg := config.DefaultConfig()
 	cfg.SaveReport = tmpFile.Name()
@@ -121,8 +127,14 @@ func TestSaveReportDryRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
+	defer func() {
+		if err := os.Remove(tmpFile.Name()); err != nil {
+			t.Logf("Failed to remove temp file: %v", err)
+		}
+	}()
 
 	cfg := config.DefaultConfig()
 	cfg.SaveReport = tmpFile.Name()
@@ -164,8 +176,14 @@ func TestSaveReportWithEmptyFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
+	defer func() {
+		if err := os.Remove(tmpFile.Name()); err != nil {
+			t.Logf("Failed to remove temp file: %v", err)
+		}
+	}()
 
 	cfg := config.DefaultConfig()
 	cfg.SaveReport = tmpFile.Name()
@@ -515,8 +533,12 @@ func BenchmarkSaveReport(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Truncate file for each iteration
-		tmpFile.Truncate(0)
-		tmpFile.Seek(0, 0)
+		if err := tmpFile.Truncate(0); err != nil {
+			b.Fatalf("Failed to truncate file: %v", err)
+		}
+		if _, err := tmpFile.Seek(0, 0); err != nil {
+			b.Fatalf("Failed to seek file: %v", err)
+		}
 
 		err := saveReport(cfg, results, 100, 0, 0)
 		if err != nil {
@@ -553,8 +575,13 @@ func BenchmarkSaveReportLarge(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tmpFile.Truncate(0)
-		tmpFile.Seek(0, 0)
+		// Truncate file for each iteration
+		if err := tmpFile.Truncate(0); err != nil {
+			b.Fatalf("Failed to truncate file: %v", err)
+		}
+		if _, err := tmpFile.Seek(0, 0); err != nil {
+			b.Fatalf("Failed to seek file: %v", err)
+		}
 
 		err := saveReport(cfg, results, 1000, 0, 0)
 		if err != nil {

@@ -38,11 +38,6 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("DefaultConfig() = %+v, want %+v", cfg, expected)
 	}
 
-	// Test that returned config is not nil
-	if cfg == nil {
-		t.Error("DefaultConfig() returned nil")
-	}
-
 	// Test specific field types and values
 	if cfg.Workers <= 0 {
 		t.Errorf("Expected Workers > 0, got %d", cfg.Workers)
@@ -148,7 +143,9 @@ func TestSetupViper(t *testing.T) {
 	cfg := DefaultConfig()
 	SetupFlags(cmd, cfg)
 
-	SetupViper(cmd)
+	if err := SetupViper(cmd); err != nil {
+		t.Fatalf("SetupViper() error = %v", err)
+	}
 
 	// Test that viper is configured correctly
 	configName := viper.ConfigFileUsed()
@@ -299,7 +296,9 @@ exclude:
 	cmd := &cobra.Command{}
 	cfg := DefaultConfig()
 	SetupFlags(cmd, cfg)
-	SetupViper(cmd)
+	if err := SetupViper(cmd); err != nil {
+		t.Fatalf("SetupViper() error = %v", err)
+	}
 
 	// Load config
 	loadedCfg, err := LoadConfig()
@@ -510,7 +509,9 @@ func TestSetupViperEdgeCases(t *testing.T) {
 	SetupFlags(cmd, cfg)
 
 	// This should not panic even with invalid HOME
-	SetupViper(cmd)
+	if err := SetupViper(cmd); err != nil {
+		t.Fatalf("SetupViper() error = %v", err)
+	}
 
 	// Should still be able to load config
 	loadedCfg, err := LoadConfig()
@@ -587,13 +588,6 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
-}
-
-// Error injection test helper
-type errorViper struct{}
-
-func (e *errorViper) Unmarshal(interface{}) error {
-	return fmt.Errorf("forced unmarshal error")
 }
 
 func TestLoadConfigUnmarshalError(t *testing.T) {

@@ -494,10 +494,6 @@ func TestTypeComparison(t *testing.T) {
 		t.Error("OperationFetch should not equal OperationPull")
 	}
 
-	if OperationFetch != OperationFetch {
-		t.Error("OperationFetch should equal itself")
-	}
-
 	// Test with variables
 	op1 := OperationFetch
 	op2 := OperationFetch
