@@ -1,32 +1,73 @@
+# Release Workflow for git-herd
+# Triggers on version tags (v*.*.*) and creates GitHub releases
+
 name: Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v1.0.0)'
+        required: false
+        type: string
 
 permissions:
   contents: write
   packages: write
   id-token: write
 
+env:
+  GO_VERSION: "1.25"
+
 jobs:
-  goreleaser:
+  release:
+    name: Release
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.3'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Run tests
+        run: |
+          go mod download
+          go mod verify
+          go test -v ./...
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          # Name the builder 'goreleaser' so GoReleaser can use it
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 4
+          # Install QEMU platforms
+          platforms: linux/amd64,linux/arm64
+
+      # Verify buildx is working and list builders
+      - name: Verify buildx setup
+        run: |
+          docker buildx ls
+          docker run --privileged --rm tonistiigi/binfmt --install all
+          # Get the current builder name directly from action outputs
+          echo "Current builder: ${{ steps.buildx.outputs.name }}"
+          echo "BUILDER_NAME=${{ steps.buildx.outputs.name }}" >> $GITHUB_ENV
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -35,27 +76,57 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Optional: Import GPG key for signing
-      # - name: Import GPG key
-      #   id: import_gpg
-      #   uses: crazy-max/ghaction-import-gpg@v6
-      #   with:
-      #     gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-      #     passphrase: ${{ secrets.PASSPHRASE }}
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0.21.0
+
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: '~> v2'
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          # GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
-      - name: Upload assets
-        uses: actions/upload-artifact@v4
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v6
         with:
-          name: git-herd-release
+          name: release-artifacts
           path: dist/*
+          retention-days: 30
+
+  verify:
+    name: Verify Release
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Wait for release
+        run: sleep 30
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Verify GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          echo "Checking release for tag: $TAG"
+          gh release view "$TAG" --repo "${{ github.repository }}"
+
+      - name: Test installation (Go)
+        run: |
+          go install github.com/${{ github.repository }}@${{ github.ref_name }}
+          git-herd --version
+
+      - name: Test Docker image
+        run: |
+          docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          docker run --rm ghcr.io/${{ github.repository }}:${{ github.ref_name }} --version
+        continue-on-error: true

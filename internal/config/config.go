@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,7 +44,7 @@ func SetupFlags(cmd *cobra.Command, config *types.Config) {
 }
 
 // SetupViper configures viper for configuration file support
-func SetupViper(cmd *cobra.Command) {
+func SetupViper(cmd *cobra.Command) error {
 	// Setup viper for configuration file support
 	viper.SetConfigName("git-herd")
 	viper.SetConfigType("yaml")
@@ -51,20 +52,26 @@ func SetupViper(cmd *cobra.Command) {
 	viper.AddConfigPath("$HOME/.config/git-herd")
 
 	// Bind flags to viper
-	_ = viper.BindPFlag("operation", cmd.Flags().Lookup("operation"))
-	_ = viper.BindPFlag("workers", cmd.Flags().Lookup("workers"))
-	_ = viper.BindPFlag("dry-run", cmd.Flags().Lookup("dry-run"))
-	_ = viper.BindPFlag("recursive", cmd.Flags().Lookup("recursive"))
-	_ = viper.BindPFlag("skip-dirty", cmd.Flags().Lookup("skip-dirty"))
-	_ = viper.BindPFlag("verbose", cmd.Flags().Lookup("verbose"))
-	_ = viper.BindPFlag("plain", cmd.Flags().Lookup("plain"))
-	_ = viper.BindPFlag("full-summary", cmd.Flags().Lookup("full-summary"))
-	_ = viper.BindPFlag("save-report", cmd.Flags().Lookup("save-report"))
-	_ = viper.BindPFlag("timeout", cmd.Flags().Lookup("timeout"))
-	_ = viper.BindPFlag("exclude", cmd.Flags().Lookup("exclude"))
+	flags := []string{
+		"operation", "workers", "dry-run", "recursive", "skip-dirty",
+		"verbose", "plain", "full-summary", "save-report", "timeout", "exclude",
+	}
+
+	for _, name := range flags {
+		if err := viper.BindPFlag(name, cmd.Flags().Lookup(name)); err != nil {
+			return fmt.Errorf("failed to bind flag %s: %v", name, err)
+		}
+	}
 
 	// Try to read config file (ignore error if file doesn't exist)
-	_ = viper.ReadInConfig()
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			// Config file was found but another error occurred
+			fmt.Printf("Warning: failed to parse config file: %v\n", err)
+		}
+	}
+
+	return nil
 }
 
 // LoadConfig loads and validates configuration

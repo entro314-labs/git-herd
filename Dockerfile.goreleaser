@@ -1,0 +1,20 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    git \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r app && useradd -r -g app app
+
+# GoReleaser v2 places binaries in subdirectories matching the target platform
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/git-herd /usr/local/bin/git-herd
+RUN chmod +x /usr/local/bin/git-herd
+
+USER app
+WORKDIR /workspace
+
+ENTRYPOINT ["/usr/local/bin/git-herd"]
+CMD ["--help"]

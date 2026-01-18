@@ -32,6 +32,7 @@ type Model struct {
 	processing bool
 	done       bool
 	err        error
+	nextIndex  int
 }
 
 type reposFoundMsg []types.GitRepo
@@ -63,6 +64,7 @@ func NewModel(config *types.Config, rootPath string) *Model {
 		spinner:   s,
 		progress:  p,
 		scanning:  true,
+		nextIndex: 0,
 	}
 }
 
@@ -92,6 +94,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scanning = false
 		m.processing = true
 		m.phase = "processing"
+		m.nextIndex = 0
 
 		if len(m.repos) == 0 {
 			m.done = true
@@ -115,8 +118,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		}
 
-		// Process next repo
-		return m, m.processNextRepo()
+		// Process next repo if any remain
+		if m.nextIndex < len(m.repos) {
+			return m, m.processNextRepo()
+		}
+		return m, nil
 
 	case processingDoneMsg:
 		m.processing = false
@@ -134,7 +140,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) scanRepos() tea.Cmd {
 	return tea.Cmd(func() tea.Msg {
-		repos, err := m.scanner.FindRepos(m.ctx, m.rootPath)
+		repos, err := m.scanner.FindRepos(m.ctx, m.rootPath, nil)
 		if err != nil {
 			return processingDoneMsg{err: err}
 		}
@@ -143,23 +149,32 @@ func (m *Model) scanRepos() tea.Cmd {
 }
 
 func (m *Model) processRepos() tea.Cmd {
-	return func() tea.Msg {
-		// Process first repo
-		if len(m.repos) > 0 {
-			processed := m.processor.ProcessRepo(m.ctx, m.repos[0])
-			return repoProcessedMsg(processed)
-		}
-
-		return processingDoneMsg{err: nil}
+	var cmds []tea.Cmd
+	workerCount := m.config.Workers
+	if workerCount <= 0 {
+		workerCount = 1
 	}
+
+	// Launch initial batch of workers
+	for i := 0; i < workerCount && m.nextIndex < len(m.repos); i++ {
+		cmds = append(cmds, m.processNextRepo())
+	}
+
+	if len(cmds) == 0 {
+		return func() tea.Msg { return processingDoneMsg{err: nil} }
+	}
+
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) processNextRepo() tea.Cmd {
-	return func() tea.Msg {
-		if m.processed < len(m.repos) {
-			processed := m.processor.ProcessRepo(m.ctx, m.repos[m.processed])
+	if m.nextIndex < len(m.repos) {
+		idx := m.nextIndex
+		m.nextIndex++
+		return func() tea.Msg {
+			processed := m.processor.ProcessRepo(m.ctx, m.repos[idx])
 			return repoProcessedMsg(processed)
 		}
-		return processingDoneMsg{err: nil}
 	}
+	return nil
 }

@@ -27,7 +27,7 @@ func TestScanner_FindRepos_EmptyDirectory(t *testing.T) {
 	scanner := NewScanner(config)
 	ctx := context.Background()
 
-	repos, err := scanner.FindRepos(ctx, tmpDir)
+	repos, err := scanner.FindRepos(ctx, tmpDir, nil)
 	if err != nil {
 		t.Fatalf("FindRepos failed: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestScanner_FindRepos_WithGitRepo(t *testing.T) {
 	scanner := NewScanner(config)
 	ctx := context.Background()
 
-	repos, err := scanner.FindRepos(ctx, tmpDir)
+	repos, err := scanner.FindRepos(ctx, tmpDir, nil)
 	if err != nil {
 		t.Fatalf("FindRepos failed: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestScanner_ExcludeDirectories(t *testing.T) {
 	scanner := NewScanner(config)
 	ctx := context.Background()
 
-	repos, err := scanner.FindRepos(ctx, tmpDir)
+	repos, err := scanner.FindRepos(ctx, tmpDir, nil)
 	if err != nil {
 		t.Fatalf("FindRepos failed: %v", err)
 	}

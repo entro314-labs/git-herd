@@ -2,7 +2,6 @@ package git
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,15 +23,10 @@ func NewScanner(config *types.Config) *Scanner {
 }
 
 // FindRepos discovers all git repositories in the given directory
-func (s *Scanner) FindRepos(ctx context.Context, rootPath string) ([]types.GitRepo, error) {
+func (s *Scanner) FindRepos(ctx context.Context, rootPath string, onProgress func(int)) ([]types.GitRepo, error) {
 	var repos []types.GitRepo
 	var mu sync.Mutex
 	var foundCount int
-
-	// Print initial scanning message
-	if s.config.PlainMode || s.config.Verbose {
-		fmt.Printf("🔍 Scanning for Git repositories in %s...\n", rootPath)
-	}
 
 	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -74,12 +68,12 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string) ([]types.GitRe
 			mu.Lock()
 			repos = append(repos, repo)
 			foundCount++
-
-			// Show progress every 10 repositories found (only in plain/verbose mode)
-			if (s.config.PlainMode || s.config.Verbose) && foundCount%10 == 0 {
-				fmt.Printf("   Found %d repositories so far...\n", foundCount)
-			}
+			currentCount := foundCount
 			mu.Unlock()
+
+			if onProgress != nil {
+				onProgress(currentCount)
+			}
 
 			// Skip subdirectories if not recursive
 			if !s.config.Recursive {
@@ -89,11 +83,6 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string) ([]types.GitRe
 
 		return nil
 	})
-
-	// Print final count
-	if s.config.PlainMode || s.config.Verbose {
-		fmt.Printf("✅ Scan complete: found %d Git repositories\n", len(repos))
-	}
 
 	return repos, err
 }

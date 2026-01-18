@@ -1,0 +1,288 @@
+# GoReleaser Configuration for git-herd
+# Comprehensive configuration with support for:
+# - Multi-platform builds (Linux, macOS, Windows)
+# - Package managers: Homebrew, AUR, Winget, Nix
+# - Docker images with multi-arch manifests
+# - SBOM generation and GPG signing
+#
+# Documentation: https://goreleaser.com
+
+version: 2
+
+
+
+project_name: git-herd
+
+# =============================================================================
+# Environment
+# =============================================================================
+env:
+  - GO111MODULE=on
+
+# =============================================================================
+# Before hooks
+# =============================================================================
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+
+# =============================================================================
+# Builds
+# =============================================================================
+builds:
+  - id: git-herd
+    main: ./cmd/git-herd
+    binary: git-herd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+# =============================================================================
+# Universal binaries (macOS)
+# =============================================================================
+universal_binaries:
+  - id: git-herd-universal
+    name_template: git-herd
+    replace: true
+
+# =============================================================================
+# Archives
+# =============================================================================
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- if eq .Os "darwin" }}macOS
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+
+# =============================================================================
+# Checksums
+# =============================================================================
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# =============================================================================
+# Snapshots
+# =============================================================================
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# =============================================================================
+# Changelog
+# =============================================================================
+changelog:
+  use: github
+  sort: asc
+  abbrev: 7
+  groups:
+    - title: "🚀 Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: "🐛 Bug Fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: "📚 Documentation"
+      regexp: '^.*?docs?(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: "🔧 Performance & Refactors"
+      regexp: '^.*?(perf|refactor)(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: "📦 Dependencies"
+      regexp: '^.*?(build|deps?)(\([[:word:]]+\))??!?:.+$'
+      order: 4
+    - title: "Other Changes"
+      order: 999
+  filters:
+    exclude:
+      - '^chore:'
+      - '^style:'
+      - '^test:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+      - go mod tidy
+
+# =============================================================================
+# GitHub Release
+# =============================================================================
+release:
+  github:
+    owner: entro314-labs
+    name: git-herd
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## git-herd {{ .Tag }}
+
+    **Release Date**: {{ .Date }}
+
+  footer: |
+    ---
+
+    ## Installation
+
+    ### Homebrew (macOS/Linux)
+    ```bash
+    brew install entro314-labs/tap/git-herd
+    ```
+
+    ### Go Install
+    ```bash
+    go install github.com/entro314-labs/git-herd@{{ .Tag }}
+    ```
+
+    ### Docker
+    ```bash
+    docker pull ghcr.io/entro314-labs/git-herd:{{ .Version }}
+    ```
+
+    ### Manual Installation
+    Download the appropriate binary for your platform from the assets below.
+
+    **Full Changelog**: https://github.com/entro314-labs/git-herd/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+# =============================================================================
+# Homebrew (uncomment when homebrew-tap repo is created)
+# =============================================================================
+homebrew_casks:
+  - name: git-herd
+    repository:
+      owner: entro314-labs
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/entro314-labs/git-herd
+    description: "A concurrent Git repository management tool"
+    license: MIT
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Homebrew Cask update for {{ .ProjectName }} version {{ .Tag }}"
+    
+    # Casks use declarative binaries and completions, not Ruby install scripts
+    binaries:
+      - git-herd
+    
+    # Define completions if you generate them in your build or have them in the repo
+    # Assuming completions are generated/available
+    # completions:
+    #   bash: completions/git-herd.bash
+    #   zsh: completions/git-herd.zsh
+    #   fish: completions/git-herd.fish
+
+# =============================================================================
+# Linux packages (deb/rpm)
+# =============================================================================
+nfpms:
+  - id: packages
+    package_name: git-herd
+    file_name_template: "{{ .ConventionalFileName }}"
+    homepage: https://github.com/entro314-labs/git-herd
+    description: "A concurrent Git repository management tool"
+    maintainer: "entro314-labs"
+    license: MIT
+    vendor: entro314-labs
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+
+# =============================================================================
+# Docker
+# =============================================================================
+dockers_v2:
+  - ids:
+      - git-herd
+    dockerfile: Dockerfile.goreleaser
+    
+    images:
+      - "ghcr.io/entro314-labs/git-herd"
+    
+    tags:
+      - "{{ .Version }}"
+      - "latest"
+      - "{{ .Version }}-amd64"
+      - "{{ .Version }}-arm64"
+    
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    
+    # Skip Docker builds in snapshot mode - --load is incompatible with cross-arch builds
+    # Production releases (with tags) will still build and push Docker images
+    disable: "{{ .IsSnapshot }}"
+    
+    flags:
+      - "--pull"
+      
+    labels:
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "https://github.com/entro314-labs/git-herd"
+
+
+# =============================================================================
+# SBOM (Software Bill of Materials)
+# =============================================================================
+sboms:
+  - id: archive
+    artifacts: archive
+  - id: source
+    artifacts: source
+
+# =============================================================================
+# Source archive
+# =============================================================================
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}_{{ .Version }}_source"
+  format: tar.gz
+
+# =============================================================================
+# Metadata
+# =============================================================================
+metadata:
+  mod_timestamp: '{{ .CommitTimestamp }}'
+
+# =============================================================================
+# Announcements (optional)
+# =============================================================================
+announce:
+  skip: "{{gt .Patch 0}}"  # Skip announcements for patch releases

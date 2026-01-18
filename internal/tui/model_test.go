@@ -491,6 +491,7 @@ func TestModelProcessNextRepo(t *testing.T) {
 		{Path: "/test/repo2", Name: "repo2", HasGit: true},
 	}
 	model.processed = 1 // One repo already processed
+	model.nextIndex = 1
 
 	cmd := model.processNextRepo()
 	if cmd == nil {
@@ -512,25 +513,11 @@ func TestModelProcessNextRepoComplete(t *testing.T) {
 		{Path: "/test/repo1", Name: "repo1"},
 	}
 	model.processed = 1 // All repos processed
+	model.nextIndex = 1
 
 	cmd := model.processNextRepo()
-	if cmd == nil {
-		t.Error("Expected processNextRepo to return a command")
-	}
-
-	msg := cmd()
-	if msg == nil {
-		t.Error("Expected processNextRepo command to return a message")
-	}
-
-	// Should return processingDoneMsg
-	doneMsg, ok := msg.(processingDoneMsg)
-	if !ok {
-		t.Errorf("Expected processingDoneMsg, got %T", msg)
-	}
-
-	if doneMsg.err != nil {
-		t.Errorf("Expected no error when all repos processed, got %v", doneMsg.err)
+	if cmd != nil {
+		t.Error("Expected processNextRepo to return nil when all repos processed")
 	}
 }
 

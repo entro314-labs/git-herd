@@ -69,7 +69,10 @@ found in the specified directory and its subdirectories.`,
 
 	// Setup configuration flags and viper
 	config.SetupFlags(rootCmd, cfg)
-	config.SetupViper(rootCmd)
+	if err := config.SetupViper(rootCmd); err != nil {
+		fmt.Fprintf(os.Stderr, "Error setting up config: %v\n", err)
+		os.Exit(1)
+	}
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

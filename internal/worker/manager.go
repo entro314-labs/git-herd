@@ -47,19 +47,17 @@ func New(config *types.Config) *Manager {
 func (m *Manager) Execute(ctx context.Context, rootPath string) error {
 	// Use TUI if not in plain mode and not verbose (TUI doesn't work well with verbose logging)
 	if !m.config.PlainMode && !m.config.Verbose {
-		fmt.Printf("🎨 Starting git-herd TUI...\n") // Debug
 		model := tui.NewModel(m.config, rootPath)
 		p := tea.NewProgram(model)
 
 		if _, err := p.Run(); err != nil {
-			fmt.Printf("TUI failed: %v\n", err) // Debug
 			// Fallback to plain mode if TUI fails
+			m.logger.Error("TUI failed, falling back to plain mode", "error", err)
 			return m.executeInPlainMode(ctx, rootPath)
 		}
 		return nil
 	}
 
-	fmt.Printf("Using plain mode (plain: %v, verbose: %v)\n", m.config.PlainMode, m.config.Verbose) // Debug
 	return m.executeInPlainMode(ctx, rootPath)
 }
 
@@ -71,9 +69,21 @@ func (m *Manager) executeInPlainMode(ctx context.Context, rootPath string) error
 		"workers", m.config.Workers)
 
 	// Find all git repositories
-	repos, err := m.scanner.FindRepos(ctx, rootPath)
+	if m.config.PlainMode || m.config.Verbose {
+		fmt.Printf("🔍 Scanning for Git repositories in %s...\n", rootPath)
+	}
+
+	repos, err := m.scanner.FindRepos(ctx, rootPath, func(count int) {
+		if (m.config.PlainMode || m.config.Verbose) && count%10 == 0 {
+			fmt.Printf("   Found %d repositories so far...\n", count)
+		}
+	})
 	if err != nil {
 		return fmt.Errorf("failed to find repositories: %w", err)
+	}
+
+	if m.config.PlainMode || m.config.Verbose {
+		fmt.Printf("✅ Scan complete: found %d Git repositories\n", len(repos))
 	}
 
 	if len(repos) == 0 {
@@ -111,7 +121,9 @@ func (m *Manager) processReposConcurrently(ctx context.Context, repos []types.Gi
 	// Start result collector
 	go func() {
 		defer close(resultChan)
-		_ = g.Wait() // Wait for all workers to complete
+		if err := g.Wait(); err != nil {
+			m.logger.Error("Worker group failed", "error", err)
+		}
 	}()
 
 	// Collect and display results
@@ -225,7 +237,11 @@ func (m *Manager) saveReport(results []types.GitRepo, successful, failed, skippe
 	if err != nil {
 		return fmt.Errorf("failed to create report file: %w", err)
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			m.logger.Error("Failed to close report file", "error", closeErr)
+		}
+	}()
 
 	// Write header
 	if _, err := fmt.Fprintf(file, "git-herd Report - %s\n", time.Now().Format("2006-01-02 15:04:05")); err != nil {
