@@ -265,9 +265,9 @@ found in the specified directory and its subdirectories.`,
 
 			// Add timeout if specified
 			if cfg.Timeout > 0 {
-				var timeoutCancel context.CancelFunc
-				ctx, timeoutCancel = context.WithTimeout(ctx, cfg.Timeout)
+				timeoutCtx, timeoutCancel := context.WithTimeout(ctx, cfg.Timeout)
 				defer timeoutCancel()
+				ctx = timeoutCtx
 			}
 
 			// Determine root path
