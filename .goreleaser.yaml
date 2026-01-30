@@ -192,11 +192,11 @@ homebrew_casks:
       name: goreleaserbot
       email: bot@goreleaser.com
     commit_msg_template: "Homebrew Cask update for {{ .ProjectName }} version {{ .Tag }}"
-    
+
     # Casks use declarative binaries and completions, not Ruby install scripts
     binaries:
       - git-herd
-    
+
     # Define completions if you generate them in your build or have them in the repo
     # Assuming completions are generated/available
     # completions:
@@ -229,27 +229,27 @@ dockers_v2:
   - ids:
       - git-herd
     dockerfile: Dockerfile.goreleaser
-    
+
     images:
       - "ghcr.io/entro314-labs/git-herd"
-    
+
     tags:
       - "{{ .Version }}"
       - "latest"
       - "{{ .Version }}-amd64"
       - "{{ .Version }}-arm64"
-    
+
     platforms:
       - linux/amd64
       - linux/arm64
-    
+
     # Skip Docker builds in snapshot mode - --load is incompatible with cross-arch builds
     # Production releases (with tags) will still build and push Docker images
     disable: "{{ .IsSnapshot }}"
-    
+
     flags:
       - "--pull"
-      
+
     labels:
       "org.opencontainers.image.created": "{{.Date}}"
       "org.opencontainers.image.title": "{{.ProjectName}}"
