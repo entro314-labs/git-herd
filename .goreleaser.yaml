@@ -166,7 +166,7 @@ release:
 
     ### Docker
     ```bash
-    docker pull ghcr.io/idominkos/git-herd:{{ .Version }}
+    docker pull ghcr.io/entro314-labs/git-herd:{{ .Version }}
     ```
 
     ### Manual Installation
@@ -231,7 +231,7 @@ dockers_v2:
     dockerfile: Dockerfile.goreleaser
 
     images:
-      - "ghcr.io/idominkos/git-herd"
+      - "ghcr.io/entro314-labs/git-herd"
 
     tags:
       - "{{ .Version }}"
