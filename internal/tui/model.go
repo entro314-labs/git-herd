@@ -89,6 +89,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 
+	case tea.WindowSizeMsg:
+		m.progress.Width = msg.Width - 4
+		// Limit max width to avoid excessively wide progress bars
+		if m.progress.Width > 80 {
+			m.progress.Width = 80
+		}
+		return m, nil
+
 	case reposFoundMsg:
 		m.repos = []types.GitRepo(msg)
 		m.scanning = false

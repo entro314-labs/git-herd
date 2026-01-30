@@ -21,17 +21,19 @@ func TestDefaultConfig(t *testing.T) {
 
 	// Test default values
 	expected := &types.Config{
-		Workers:     5,
-		Operation:   types.OperationFetch,
-		DryRun:      false,
-		Recursive:   true,
-		SkipDirty:   true,
-		Verbose:     false,
-		Timeout:     5 * time.Minute,
-		ExcludeDirs: []string{".git", "node_modules", "vendor"},
-		PlainMode:   false,
-		FullSummary: false,
-		SaveReport:  "",
+		Workers:      5,
+		Operation:    types.OperationFetch,
+		DryRun:       false,
+		Recursive:    true,
+		SkipDirty:    true,
+		Verbose:      false,
+		Timeout:      5 * time.Minute,
+		ExcludeDirs:  []string{".git", "node_modules", "vendor"},
+		PlainMode:    false,
+		FullSummary:  false,
+		SaveReport:   "",
+		DiscardFiles: []string{},
+		ExportScan:   "",
 	}
 
 	if !reflect.DeepEqual(cfg, expected) {
@@ -197,7 +199,7 @@ func TestLoadConfigWithViperValues(t *testing.T) {
 	// Set some values in viper using the correct keys
 	viper.Set("workers", 10)
 	viper.Set("operation", "pull")
-	viper.Set("dryrun", true) // Note: viper uses the struct field name without dash
+	viper.Set("dry-run", true) // Note: usage aligns with flag now
 	viper.Set("verbose", true)
 
 	cfg, err := LoadConfig()
@@ -230,15 +232,10 @@ func TestLoadConfigWithInvalidData(t *testing.T) {
 	// Test with invalid operation type
 	viper.Set("operation", "invalid_operation")
 
-	cfg, err := LoadConfig()
-	// Should not error but will have the invalid value
-	if err != nil {
-		t.Errorf("LoadConfig() unexpected error = %v", err)
-	}
-
-	// The invalid operation should be loaded as-is
-	if string(cfg.Operation) != "invalid_operation" {
-		t.Errorf("Expected Operation = 'invalid_operation', got %q", cfg.Operation)
+	_, err := LoadConfig()
+	// Should error due to validation
+	if err == nil {
+		t.Error("LoadConfig() expected error for invalid operation, got nil")
 	}
 }
 
@@ -263,7 +260,7 @@ func TestSetupViperWithConfigFile(t *testing.T) {
 	configContent := `
 workers: 8
 operation: pull
-dryrun: true
+dry-run: true
 verbose: true
 exclude:
   - .git

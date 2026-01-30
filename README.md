@@ -15,6 +15,8 @@ Because I'm lazy and because any given time I have more than 300 git repos local
 - ⚙️ **Configurable**: Extensive configuration options via flags or config file
 - 🚨 **Graceful Shutdown**: Handles interrupts cleanly
 - 📝 **Structured Logging**: Built-in logging with configurable verbosity
+- 🧹 **Selective File Discard**: Automatically discard changes to specific files (e.g., package.json) before pull/fetch
+- 📋 **Repository Scanning**: Export detailed repository information to markdown
 
 ## Installation
 
@@ -52,6 +54,12 @@ git-herd -w 10 ~/Projects
 
 # Verbose output for debugging
 git-herd -v ~/Projects
+
+# Discard changes to package files before pulling
+git-herd -o pull -d "package.json,package-lock.json,yarn.lock" ~/Projects
+
+# Scan repositories and export to markdown
+git-herd -o scan --export-scan repos-report.md ~/Projects
 ```
 
 ### Command Line Options
@@ -61,15 +69,20 @@ Usage:
   git-herd [path] [flags]
 
 Flags:
-  -e, --exclude strings     Directories to exclude (default [.git,node_modules,vendor])
-  -n, --dry-run            Show what would be done without executing
-  -h, --help               help for git-herd
-  -o, --operation string   Operation to perform: fetch or pull (default "fetch")
-  -r, --recursive          Process repositories recursively (default true)
-  -s, --skip-dirty         Skip repositories with uncommitted changes (default true)
-  -t, --timeout duration   Overall operation timeout (default 5m0s)
-  -v, --verbose            Enable verbose logging
-  -w, --workers int        Number of concurrent workers (default 5)
+  -e, --exclude strings       Directories to exclude (default [.git,node_modules,vendor])
+  -n, --dry-run              Show what would be done without executing
+  -h, --help                 help for git-herd
+  -o, --operation string     Operation to perform: fetch, pull, or scan (default "fetch")
+  -r, --recursive            Process repositories recursively (default true)
+  -s, --skip-dirty           Skip repositories with uncommitted changes (default true)
+  -t, --timeout duration     Overall operation timeout (default 5m0s)
+  -v, --verbose              Enable verbose logging
+  -w, --workers int          Number of concurrent workers (default 5)
+  -d, --discard-files strings File patterns to discard before pull/fetch (e.g., package.json)
+      --export-scan string   Export repository scan to markdown file (use with -o scan)
+  -p, --plain                Use plain text output instead of TUI
+  -f, --full-summary         Display full summary of all repositories
+      --save-report string   Save detailed report to file
 ```
 
 ### Configuration File
@@ -93,10 +106,11 @@ exclude:
 
 ## Operations
 
-### Fetch vs Pull
+### Fetch vs Pull vs Scan
 
 - **Fetch** (`-o fetch`): Downloads changes from remote without merging (safe, default)
 - **Pull** (`-o pull`): Downloads and merges changes (requires clean working directory)
+- **Scan** (`-o scan`): Analyzes repositories and optionally exports detailed information to markdown
 
 ### Safety Features
 
@@ -142,6 +156,9 @@ git-herd --save-report report.txt ~/Projects
 
 # Show full summary of all repositories
 git-herd --full-summary ~/Projects
+
+# Scan and export repository information to markdown
+git-herd -o scan --export-scan repos.md ~/Projects
 ```
 
 ## Advanced Usage
@@ -166,6 +183,42 @@ git-herd -e node_modules,target,dist,vendor ~/Projects
 
 # Use with specific operations
 git-herd -o pull -e ".git,tmp,cache" ~/Projects
+```
+
+### Discarding Specific Files
+
+When working with repositories that have recurring local changes to dependency files (like `package.json`, `package-lock.json`), you can automatically discard these changes before pulling:
+
+```bash
+# Discard changes to package files before pulling
+git-herd -o pull -d "package.json,package-lock.json" ~/Projects
+
+# Works with glob patterns
+git-herd -o pull -d "*.lock,package*.json" ~/Projects
+
+# Combine with other options
+git-herd -o pull -d "package.json,yarn.lock" -w 10 ~/Projects
+```
+
+This feature is useful when:
+- You update dependencies recursively and need to pull latest changes
+- Build tools modify dependency files locally
+- You want to force sync with remote versions of specific files
+
+### Scanning Repositories
+
+Get detailed information about all repositories and export to markdown:
+
+```bash
+# Scan and export to markdown
+git-herd -o scan --export-scan repos-report.md ~/Projects
+
+# The markdown report includes:
+# - Repository name and path
+# - Current branch and remote
+# - Last commit hash and message
+# - List of locally modified files
+# - Any errors encountered
 ```
 
 ### Integration with Shell

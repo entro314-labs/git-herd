@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -196,9 +197,20 @@ func (m *Manager) displayResults(ctx context.Context, resultChan <-chan types.Gi
 	// Save report to file if requested
 	if m.config.SaveReport != "" {
 		if err := m.saveReport(allResults, successful, failed, skipped); err != nil {
-			m.logger.InfoContext(ctx, "Failed to save report", "error", err)
+			m.logger.ErrorContext(ctx, "Failed to save report", "error", err)
+			fmt.Fprintf(os.Stderr, "Error saving report: %v\n", err)
 		} else {
 			fmt.Printf("📄 Detailed report saved to: %s\n", m.config.SaveReport)
+		}
+	}
+
+	// Export scan results to markdown if requested
+	if m.config.ExportScan != "" {
+		if err := m.exportScanToMarkdown(allResults, m.config.ExportScan); err != nil {
+			m.logger.ErrorContext(ctx, "Failed to export scan", "error", err)
+			fmt.Fprintf(os.Stderr, "Error exporting scan: %v\n", err)
+		} else {
+			fmt.Printf("📋 Scan report exported to: %s\n", m.config.ExportScan)
 		}
 	}
 
@@ -232,15 +244,13 @@ func (m *Manager) displaySingleResult(result types.GitRepo, isFirst bool) {
 }
 
 // saveReport saves a detailed report to a file
-func (m *Manager) saveReport(results []types.GitRepo, successful, failed, skipped int) error {
+func (m *Manager) saveReport(results []types.GitRepo, successful, failed, skipped int) (err error) {
 	file, err := os.Create(m.config.SaveReport)
 	if err != nil {
 		return fmt.Errorf("failed to create report file: %w", err)
 	}
 	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			m.logger.Error("Failed to close report file", "error", closeErr)
-		}
+		err = errors.Join(err, file.Close())
 	}()
 
 	// Write header
@@ -305,6 +315,92 @@ func (m *Manager) saveReport(results []types.GitRepo, successful, failed, skippe
 		}
 
 		if _, err := fmt.Fprintf(file, "\n"); err != nil {
+			return fmt.Errorf("failed to write separator: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// exportScanToMarkdown exports repository scan results to a markdown file
+func (m *Manager) exportScanToMarkdown(results []types.GitRepo, filePath string) error {
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create export file: %w", err)
+	}
+	defer file.Close()
+
+	// Write header
+	if _, err := fmt.Fprintf(file, "# Git Repository Scan Report\n\n"); err != nil {
+		return fmt.Errorf("failed to write header: %w", err)
+	}
+	if _, err := fmt.Fprintf(file, "Generated: %s\n\n", time.Now().Format("2006-01-02 15:04:05")); err != nil {
+		return fmt.Errorf("failed to write timestamp: %w", err)
+	}
+	if _, err := fmt.Fprintf(file, "Total Repositories: %d\n\n", len(results)); err != nil {
+		return fmt.Errorf("failed to write total: %w", err)
+	}
+	if _, err := fmt.Fprintf(file, "---\n\n"); err != nil {
+		return fmt.Errorf("failed to write separator: %w", err)
+	}
+
+	// Write repository details
+	for _, repo := range results {
+		if _, err := fmt.Fprintf(file, "## %s\n\n", repo.Name); err != nil {
+			return fmt.Errorf("failed to write repo name: %w", err)
+		}
+		if _, err := fmt.Fprintf(file, "**Path:** `%s`\n\n", repo.Path); err != nil {
+			return fmt.Errorf("failed to write path: %w", err)
+		}
+
+		if repo.Branch != "" {
+			if _, err := fmt.Fprintf(file, "**Branch:** %s\n\n", repo.Branch); err != nil {
+				return fmt.Errorf("failed to write branch: %w", err)
+			}
+		}
+
+		if repo.Remote != "" {
+			if _, err := fmt.Fprintf(file, "**Remote:** %s\n\n", repo.Remote); err != nil {
+				return fmt.Errorf("failed to write remote: %w", err)
+			}
+		}
+
+		if repo.LastCommit != "" {
+			if _, err := fmt.Fprintf(file, "**Last Commit:** `%s`\n\n", repo.LastCommit); err != nil {
+				return fmt.Errorf("failed to write commit: %w", err)
+			}
+			if repo.LastCommitMsg != "" {
+				if _, err := fmt.Fprintf(file, "**Commit Message:** %s\n\n", repo.LastCommitMsg); err != nil {
+					return fmt.Errorf("failed to write commit message: %w", err)
+				}
+			}
+		}
+
+		if len(repo.ModifiedFiles) > 0 {
+			if _, err := fmt.Fprintf(file, "**Modified Files:**\n\n"); err != nil {
+				return fmt.Errorf("failed to write modified files header: %w", err)
+			}
+			for _, modFile := range repo.ModifiedFiles {
+				if _, err := fmt.Fprintf(file, "- `%s`\n", modFile); err != nil {
+					return fmt.Errorf("failed to write modified file: %w", err)
+				}
+			}
+			if _, err := fmt.Fprintf(file, "\n"); err != nil {
+				return fmt.Errorf("failed to write newline: %w", err)
+			}
+		} else {
+			if _, err := fmt.Fprintf(file, "**Status:** Clean (no local changes)\n\n"); err != nil {
+				return fmt.Errorf("failed to write clean status: %w", err)
+			}
+		}
+
+		if repo.Error != nil {
+			if _, err := fmt.Fprintf(file, "**Error:** %v\n\n", repo.Error); err != nil {
+				return fmt.Errorf("failed to write error: %w", err)
+			}
+		}
+
+		if _, err := fmt.Fprintf(file, "---\n\n"); err != nil {
 			return fmt.Errorf("failed to write separator: %w", err)
 		}
 	}

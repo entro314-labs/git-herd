@@ -3,6 +3,10 @@ package git
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	gogit "github.com/go-git/go-git/v5"
@@ -48,6 +52,13 @@ func (p *Processor) AnalyzeRepo(repo *types.GitRepo) {
 		repo.Branch = "detached"
 	}
 
+	// Get last commit information
+	commit, err := gitRepo.CommitObject(head.Hash())
+	if err == nil {
+		repo.LastCommit = head.Hash().String()[:8] // Short hash
+		repo.LastCommitMsg = strings.Split(commit.Message, "\n")[0] // First line only
+	}
+
 	// Check working tree status
 	worktree, err := gitRepo.Worktree()
 	if err != nil {
@@ -62,6 +73,14 @@ func (p *Processor) AnalyzeRepo(repo *types.GitRepo) {
 	}
 
 	repo.Clean = status.IsClean()
+
+	// Collect modified files
+	repo.ModifiedFiles = []string{}
+	for file, fileStatus := range status {
+		if fileStatus.Worktree != gogit.Unmodified || fileStatus.Staging != gogit.Unmodified {
+			repo.ModifiedFiles = append(repo.ModifiedFiles, file)
+		}
+	}
 
 	// Get remote information
 	remotes, err := gitRepo.Remotes()
@@ -84,8 +103,25 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 		return repo
 	}
 
-	// Skip dirty repos if configured
-	if p.config.SkipDirty && !repo.Clean {
+	// Discard specific files if configured
+	if len(p.config.DiscardFiles) > 0 && !repo.Clean {
+		gitRepo, err := gogit.PlainOpen(repo.Path)
+		if err != nil {
+			repo.Error = fmt.Errorf("failed to open repository for discard: %w", err)
+			return repo
+		}
+
+		if err := p.discardFiles(gitRepo, &repo); err != nil {
+			repo.Error = fmt.Errorf("failed to discard files: %w", err)
+			return repo
+		}
+
+		// Re-analyze after discarding files
+		p.AnalyzeRepo(&repo)
+	}
+
+	// Skip dirty repos if configured (but not for scan operation)
+	if p.config.SkipDirty && !repo.Clean && p.config.Operation != types.OperationScan {
 		repo.Error = fmt.Errorf("repository has uncommitted changes (skipped)")
 		return repo
 	}
@@ -105,6 +141,9 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 		err = p.fetchRepo(ctx, gitRepo)
 	case types.OperationPull:
 		err = p.pullRepo(ctx, gitRepo)
+	case types.OperationScan:
+		// Scan operation - analysis already done in AnalyzeRepo
+		return repo
 	}
 
 	if err != nil {
@@ -142,6 +181,69 @@ func (p *Processor) pullRepo(ctx context.Context, repo *gogit.Repository) error 
 
 	if err != nil && err != gogit.NoErrAlreadyUpToDate {
 		return fmt.Errorf("pull failed: %w", err)
+	}
+
+	return nil
+}
+
+// discardFiles discards changes to specific files matching the configured patterns
+func (p *Processor) discardFiles(gitRepo *gogit.Repository, repo *types.GitRepo) error {
+	worktree, err := gitRepo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	status, err := worktree.Status()
+	if err != nil {
+		return fmt.Errorf("failed to get status: %w", err)
+	}
+
+	// Track which files were discarded
+	var discardedFiles []string
+
+	// Iterate through modified files and discard those matching patterns
+	for file, fileStatus := range status {
+		if fileStatus.Worktree == gogit.Unmodified && fileStatus.Staging == gogit.Unmodified {
+			continue
+		}
+
+		// Check if file matches any discard pattern
+		shouldDiscard := false
+		for _, pattern := range p.config.DiscardFiles {
+			// Support both exact matches and glob patterns
+			matched, err := filepath.Match(pattern, filepath.Base(file))
+			if err == nil && matched {
+				shouldDiscard = true
+				break
+			}
+			// Also check exact match
+			if file == pattern || filepath.Base(file) == pattern {
+				shouldDiscard = true
+				break
+			}
+		}
+
+		if shouldDiscard {
+			discardedFiles = append(discardedFiles, file)
+		}
+	}
+
+	// If we have files to discard, use git checkout to reset them
+	if len(discardedFiles) > 0 {
+		for _, file := range discardedFiles {
+			// Use git command to discard changes to specific file
+			cmd := exec.Command("git", "checkout", "HEAD", "--", file)
+			cmd.Dir = repo.Path
+			cmd.Env = os.Environ()
+
+			if output, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("failed to discard %s: %w (output: %s)", file, err, string(output))
+			}
+		}
+
+		if p.config.Verbose {
+			fmt.Printf("  Discarded changes in %s: %v\n", repo.Name, discardedFiles)
+		}
 	}
 
 	return nil

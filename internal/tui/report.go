@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -15,13 +16,11 @@ func saveReport(config *types.Config, results []types.GitRepo, successful, faile
 		return fmt.Errorf("failed to create report file: %w", err)
 	}
 	defer func() {
-		if closeErr := file.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("failed to close report file: %w", closeErr)
-		}
+		err = errors.Join(err, file.Close())
 	}()
 
 	var writeErr error
-	fprintf := func(format string, a ...interface{}) {
+	fprintf := func(format string, a ...any) {
 		if writeErr != nil {
 			return
 		}
