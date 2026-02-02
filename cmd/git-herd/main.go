@@ -11,6 +11,7 @@ import (
 
 	"github.com/entro314-labs/git-herd/internal/config"
 	"github.com/entro314-labs/git-herd/internal/worker"
+	"github.com/entro314-labs/git-herd/pkg/types"
 )
 
 // Version information - populated at build time by GoReleaser
@@ -31,7 +32,11 @@ func buildVersion() string {
 
 func main() {
 	cfg := config.DefaultConfig()
+	rootCmd := newRootCommand(cfg)
+	cobra.CheckErr(rootCmd.Execute())
+}
 
+func newRootCommand(cfg *types.Config) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "git-herd [path]",
 		Short: "Bulk git operations on multiple repositories",
@@ -39,6 +44,19 @@ func main() {
 found in the specified directory and its subdirectories.`,
 		Version: buildVersion(),
 		Args:    cobra.MaximumNArgs(1),
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := config.SetupViper(cmd); err != nil {
+				return err
+			}
+
+			loadedCfg, err := config.LoadConfig()
+			if err != nil {
+				return err
+			}
+
+			*cfg = *loadedCfg
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Setup signal handling for graceful shutdown
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -57,8 +75,12 @@ found in the specified directory and its subdirectories.`,
 			}
 
 			// Validate path
-			if _, err := os.Stat(rootPath); os.IsNotExist(err) {
-				return fmt.Errorf("path does not exist: %s", rootPath)
+			info, err := os.Stat(rootPath)
+			if err != nil {
+				return fmt.Errorf("stat path %s: %w", rootPath, err)
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("path is not a directory: %s", rootPath)
 			}
 
 			// Create and execute manager
@@ -67,14 +89,8 @@ found in the specified directory and its subdirectories.`,
 		},
 	}
 
-	// Setup configuration flags and viper
+	// Setup configuration flags
 	config.SetupFlags(rootCmd, cfg)
-	if err := config.SetupViper(rootCmd); err != nil {
-		fmt.Fprintf(os.Stderr, "Error setting up config: %v\n", err)
-		os.Exit(1)
-	}
 
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	return rootCmd
 }

@@ -92,9 +92,15 @@ Create a `git-herd.yaml` file in your working directory or `~/.config/git-herd/`
 ```yaml
 operation: fetch
 workers: 10
-skip-dirty: true
+dry-run: false
 recursive: true
+skip-dirty: true
 verbose: false
+plain: false
+full-summary: false
+save-report: ""
+discard-files: []
+export-scan: ""
 timeout: 10m
 exclude:
   - .git
@@ -103,6 +109,12 @@ exclude:
   - target
   - dist
 ```
+
+Environment variables use the `GIT_HERD_` prefix with dashes replaced by underscores, for example:
+
+- `GIT_HERD_WORKERS=10`
+- `GIT_HERD_OPERATION=pull`
+- `GIT_HERD_TIMEOUT=10m`
 
 ## Operations
 
@@ -256,7 +268,7 @@ git-herd provides detailed error reporting and handles common scenarios:
 ## Building from Source
 
 Requirements:
-- Go 1.25 or later
+- Go 1.24 or later (tested with 1.25.x)
 
 ```bash
 git clone https://github.com/entro314-labs/git-herd

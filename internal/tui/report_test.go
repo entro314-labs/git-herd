@@ -450,8 +450,14 @@ func TestSaveReportErrorHandling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
+	defer func() {
+		if err := os.Remove(tmpFile.Name()); err != nil {
+			t.Logf("Failed to remove temp file: %v", err)
+		}
+	}()
 
 	cfg := config.DefaultConfig()
 	cfg.SaveReport = tmpFile.Name()
@@ -531,7 +537,14 @@ func BenchmarkSaveReport(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() {
+		if err := tmpFile.Close(); err != nil {
+			b.Logf("Failed to close temp file: %v", err)
+		}
+		if err := os.Remove(tmpFile.Name()); err != nil {
+			b.Logf("Failed to remove temp file: %v", err)
+		}
+	}()
 
 	cfg := config.DefaultConfig()
 	cfg.SaveReport = tmpFile.Name()
@@ -574,7 +587,14 @@ func BenchmarkSaveReportLarge(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() {
+		if err := tmpFile.Close(); err != nil {
+			b.Logf("Failed to close temp file: %v", err)
+		}
+		if err := os.Remove(tmpFile.Name()); err != nil {
+			b.Logf("Failed to remove temp file: %v", err)
+		}
+	}()
 
 	cfg := config.DefaultConfig()
 	cfg.SaveReport = tmpFile.Name()

@@ -323,12 +323,14 @@ func (m *Manager) saveReport(results []types.GitRepo, successful, failed, skippe
 }
 
 // exportScanToMarkdown exports repository scan results to a markdown file
-func (m *Manager) exportScanToMarkdown(results []types.GitRepo, filePath string) error {
+func (m *Manager) exportScanToMarkdown(results []types.GitRepo, filePath string) (err error) {
 	file, err := os.Create(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to create export file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		err = errors.Join(err, file.Close())
+	}()
 
 	// Write header
 	if _, err := fmt.Fprintf(file, "# Git Repository Scan Report\n\n"); err != nil {

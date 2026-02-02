@@ -42,3 +42,4 @@ dist/
 .packaging/RELEASE_PROCESS.md
 .packaging/winget/git-herd.yaml
 .claude/settings.local.json
+tag.md

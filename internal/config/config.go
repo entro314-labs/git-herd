@@ -1,7 +1,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -75,7 +79,13 @@ func SetupViper(cmd *cobra.Command) error {
 	viper.SetConfigName("git-herd")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
-	viper.AddConfigPath("$HOME/.config/git-herd")
+	if configDir, err := os.UserConfigDir(); err == nil {
+		viper.AddConfigPath(filepath.Join(configDir, "git-herd"))
+	}
+
+	viper.SetEnvPrefix("GIT_HERD")
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+	viper.AutomaticEnv()
 
 	// Bind flags to viper
 	flags := []string{
@@ -85,17 +95,25 @@ func SetupViper(cmd *cobra.Command) error {
 	}
 
 	for _, name := range flags {
-		if err := viper.BindPFlag(name, cmd.Flags().Lookup(name)); err != nil {
-			return fmt.Errorf("failed to bind flag %s: %v", name, err)
+		flag := cmd.Flags().Lookup(name)
+		if flag == nil {
+			return fmt.Errorf("missing flag definition: %s", name)
+		}
+		if err := viper.BindPFlag(name, flag); err != nil {
+			return fmt.Errorf("bind flag %s: %w", name, err)
+		}
+		if err := viper.BindEnv(name); err != nil {
+			return fmt.Errorf("bind env %s: %w", name, err)
 		}
 	}
 
 	// Try to read config file (ignore error if file doesn't exist)
 	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			// Config file was found but another error occurred
-			fmt.Printf("Warning: failed to parse config file: %v\n", err)
+		var notFound viper.ConfigFileNotFoundError
+		if errors.As(err, &notFound) {
+			return nil
 		}
+		return fmt.Errorf("read config: %w", err)
 	}
 
 	return nil
@@ -107,21 +125,42 @@ func LoadConfig() (*types.Config, error) {
 
 	// Load from viper (which includes file and flags)
 	if err := viper.Unmarshal(config); err != nil {
+		return nil, fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	if err := ValidateConfig(config); err != nil {
 		return nil, err
 	}
 
-	// Validation
-	switch config.Operation {
-	case types.OperationFetch, types.OperationPull, types.OperationScan:
-		// valid
-	default:
-		// Default to fetch if invalid or empty (though flag default is "fetch")
-		if config.Operation == "" {
-			config.Operation = types.OperationFetch
-		} else {
-			return nil, fmt.Errorf("invalid operation: %s (must be 'fetch', 'pull', or 'scan')", config.Operation)
+	return config, nil
+}
+
+// ValidateConfig validates and normalizes configuration
+func ValidateConfig(config *types.Config) error {
+	if config.Workers <= 0 {
+		return fmt.Errorf("workers must be greater than 0")
+	}
+
+	if config.Timeout < 0 {
+		return fmt.Errorf("timeout must be non-negative")
+	}
+
+	operation := strings.ToLower(strings.TrimSpace(string(config.Operation)))
+	if operation == "" {
+		config.Operation = types.OperationFetch
+	} else {
+		config.Operation = types.OperationType(operation)
+		switch config.Operation {
+		case types.OperationFetch, types.OperationPull, types.OperationScan:
+			// valid
+		default:
+			return fmt.Errorf("invalid operation: %s (must be 'fetch', 'pull', or 'scan')", config.Operation)
 		}
 	}
 
-	return config, nil
+	if config.ExportScan != "" && config.Operation != types.OperationScan {
+		return fmt.Errorf("export-scan requires operation 'scan'")
+	}
+
+	return nil
 }

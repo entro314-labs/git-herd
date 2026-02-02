@@ -2,17 +2,13 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/entro314-labs/git-herd/internal/config"
-	"github.com/entro314-labs/git-herd/pkg/types"
 )
 
 func TestBuildVersion(t *testing.T) {
@@ -82,12 +78,9 @@ func TestBuildVersion(t *testing.T) {
 }
 
 func TestRootCommandCreation(t *testing.T) {
-	t.Parallel()
-
 	// Create a minimal test that verifies root command structure
 	cfg := config.DefaultConfig()
-
-	rootCmd := createRootCommand(cfg)
+	rootCmd := newRootCommand(cfg)
 
 	// Test command properties
 	if rootCmd.Use != "git-herd [path]" {
@@ -120,10 +113,8 @@ func TestRootCommandCreation(t *testing.T) {
 }
 
 func TestRootCommandInvalidPath(t *testing.T) {
-	t.Parallel()
-
 	cfg := config.DefaultConfig()
-	rootCmd := createRootCommand(cfg)
+	rootCmd := newRootCommand(cfg)
 
 	// Capture output
 	var buf bytes.Buffer
@@ -131,14 +122,14 @@ func TestRootCommandInvalidPath(t *testing.T) {
 	rootCmd.SetErr(&buf)
 
 	// Test with non-existent path
-	rootCmd.SetArgs([]string{"/non/existent/path"})
+	rootCmd.SetArgs([]string{"--dry-run", "--plain", "/non/existent/path"})
 
 	err := rootCmd.Execute()
 	if err == nil {
 		t.Error("Expected error for non-existent path, got nil")
 	}
 
-	expectedError := "path does not exist: /non/existent/path"
+	expectedError := "stat path /non/existent/path:"
 	if !strings.Contains(err.Error(), expectedError) {
 		t.Errorf("Expected error to contain %q, got %q", expectedError, err.Error())
 	}
@@ -161,11 +152,7 @@ func TestRootCommandValidPath(t *testing.T) {
 	}()
 
 	cfg := config.DefaultConfig()
-	cfg.DryRun = true             // Use dry run to avoid actual git operations
-	cfg.PlainMode = true          // Use plain mode to avoid TUI issues in tests
-	cfg.Timeout = 1 * time.Second // Short timeout for tests
-
-	rootCmd := createRootCommand(cfg)
+	rootCmd := newRootCommand(cfg)
 
 	// Capture output
 	var buf bytes.Buffer
@@ -173,7 +160,7 @@ func TestRootCommandValidPath(t *testing.T) {
 	rootCmd.SetErr(&buf)
 
 	// Test with valid path
-	rootCmd.SetArgs([]string{tmpDir})
+	rootCmd.SetArgs([]string{"--dry-run", "--plain", "--timeout", "1s", tmpDir})
 
 	err = rootCmd.Execute()
 	// We expect this to succeed (no error) even if no git repos are found
@@ -183,17 +170,15 @@ func TestRootCommandValidPath(t *testing.T) {
 }
 
 func TestRootCommandFlags(t *testing.T) {
-	t.Parallel()
-
 	cfg := config.DefaultConfig()
-	rootCmd := createRootCommand(cfg)
+	rootCmd := newRootCommand(cfg)
 
 	// Test that flags are properly set up
 	flags := rootCmd.Flags()
 
 	expectedFlags := []string{
 		"operation", "workers", "dry-run", "recursive", "skip-dirty",
-		"verbose", "plain", "full-summary", "save-report", "timeout", "exclude",
+		"verbose", "plain", "full-summary", "save-report", "timeout", "exclude", "discard-files", "export-scan",
 	}
 
 	for _, flagName := range expectedFlags {
@@ -205,10 +190,8 @@ func TestRootCommandFlags(t *testing.T) {
 }
 
 func TestRootCommandVersion(t *testing.T) {
-	t.Parallel()
-
 	cfg := config.DefaultConfig()
-	rootCmd := createRootCommand(cfg)
+	rootCmd := newRootCommand(cfg)
 
 	// Test version flag
 	var buf bytes.Buffer
@@ -227,10 +210,8 @@ func TestRootCommandVersion(t *testing.T) {
 }
 
 func TestRootCommandHelp(t *testing.T) {
-	t.Parallel()
-
 	cfg := config.DefaultConfig()
-	rootCmd := createRootCommand(cfg)
+	rootCmd := newRootCommand(cfg)
 
 	// Test help flag
 	var buf bytes.Buffer
@@ -246,55 +227,6 @@ func TestRootCommandHelp(t *testing.T) {
 	if !strings.Contains(output, "Usage:") {
 		t.Errorf("Expected output to contain usage info, got %q", output)
 	}
-}
-
-// createRootCommand creates a root command for testing purposes
-// This is a helper function that extracts the root command creation logic
-func createRootCommand(cfg *types.Config) *cobra.Command {
-	rootCmd := &cobra.Command{
-		Use:   "git-herd [path]",
-		Short: "Bulk git operations on multiple repositories",
-		Long: `git-herd performs git operations (fetch/pull) on all git repositories
-found in the specified directory and its subdirectories.`,
-		Version: buildVersion(),
-		Args:    cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Setup signal handling for graceful shutdown
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			// Add timeout if specified
-			if cfg.Timeout > 0 {
-				timeoutCtx, timeoutCancel := context.WithTimeout(ctx, cfg.Timeout)
-				defer timeoutCancel()
-				ctx = timeoutCtx
-			}
-
-			// Determine root path
-			rootPath := "."
-			if len(args) > 0 {
-				rootPath = args[0]
-			}
-
-			// Validate path
-			if _, err := os.Stat(rootPath); os.IsNotExist(err) {
-				return fmt.Errorf("path does not exist: %s", rootPath)
-			}
-
-			// For testing, we'll just return without executing the manager
-			if cfg.DryRun {
-				return nil
-			}
-
-			// In real implementation, this would call manager.Execute
-			return nil
-		},
-	}
-
-	// Setup configuration flags
-	config.SetupFlags(rootCmd, cfg)
-
-	return rootCmd
 }
 
 func TestMainExecution(t *testing.T) {
@@ -324,13 +256,8 @@ func TestMainExecution(t *testing.T) {
 }
 
 func TestContextHandling(t *testing.T) {
-	t.Parallel()
-
 	cfg := config.DefaultConfig()
-	cfg.DryRun = true
-	cfg.Timeout = 100 * time.Millisecond
-
-	rootCmd := createRootCommand(cfg)
+	rootCmd := newRootCommand(cfg)
 
 	// Create a temporary directory for testing
 	tmpDir, err := os.MkdirTemp("", "git-herd-test-*")
@@ -348,7 +275,7 @@ func TestContextHandling(t *testing.T) {
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
 
-	rootCmd.SetArgs([]string{tmpDir})
+	rootCmd.SetArgs([]string{"--dry-run", "--plain", "--timeout", "100ms", tmpDir})
 
 	// This should complete quickly due to dry run
 	err = rootCmd.Execute()
@@ -358,8 +285,6 @@ func TestContextHandling(t *testing.T) {
 }
 
 func TestArgumentHandling(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
 		name     string
 		args     []string
@@ -368,23 +293,23 @@ func TestArgumentHandling(t *testing.T) {
 	}{
 		{
 			name:    "no arguments",
-			args:    []string{},
+			args:    []string{"--dry-run", "--plain"},
 			wantErr: false,
 		},
 		{
 			name:    "one valid argument",
-			args:    []string{"."},
+			args:    []string{"--dry-run", "--plain", "."},
 			wantErr: false,
 		},
 		{
 			name:     "non-existent path",
-			args:     []string{"/non/existent/path"},
+			args:     []string{"--dry-run", "--plain", "/non/existent/path"},
 			wantErr:  true,
-			errMatch: "path does not exist",
+			errMatch: "stat path",
 		},
 		{
 			name:     "too many arguments",
-			args:     []string{"path1", "path2"},
+			args:     []string{"--dry-run", "--plain", "path1", "path2"},
 			wantErr:  true,
 			errMatch: "accepts at most 1 arg(s)",
 		},
@@ -392,13 +317,9 @@ func TestArgumentHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
 			// Create a new config for each parallel test to avoid data races
 			cfg := config.DefaultConfig()
-			cfg.DryRun = true
-
-			rootCmd := createRootCommand(cfg)
+			rootCmd := newRootCommand(cfg)
 			var buf bytes.Buffer
 			rootCmd.SetOut(&buf)
 			rootCmd.SetErr(&buf)
@@ -435,6 +356,6 @@ func BenchmarkRootCommandCreation(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = createRootCommand(cfg)
+		_ = newRootCommand(cfg)
 	}
 }

@@ -82,6 +82,8 @@ func TestSetupFlags(t *testing.T) {
 		{"save-report", "", ""},
 		{"timeout", "t", 5 * time.Minute},
 		{"exclude", "e", []string{".git", "node_modules", "vendor"}},
+		{"discard-files", "d", []string{}},
+		{"export-scan", "", ""},
 	}
 
 	for _, tt := range tests {
@@ -160,6 +162,7 @@ func TestSetupViper(t *testing.T) {
 	expectedBindings := []string{
 		"operation", "workers", "dry-run", "recursive", "skip-dirty",
 		"verbose", "plain", "full-summary", "save-report", "timeout", "exclude",
+		"discard-files", "export-scan",
 	}
 
 	for _, binding := range expectedBindings {
@@ -222,6 +225,61 @@ func TestLoadConfigWithViperValues(t *testing.T) {
 
 	if !cfg.Verbose {
 		t.Error("Expected Verbose = true, got false")
+	}
+}
+
+func TestLoadConfigEnvOverrides(t *testing.T) {
+	viper.Reset()
+
+	t.Setenv("GIT_HERD_WORKERS", "12")
+	t.Setenv("GIT_HERD_OPERATION", "pull")
+
+	cmd := &cobra.Command{}
+	cfg := DefaultConfig()
+	SetupFlags(cmd, cfg)
+
+	if err := SetupViper(cmd); err != nil {
+		t.Fatalf("SetupViper() error = %v", err)
+	}
+
+	loadedCfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if loadedCfg.Workers != 12 {
+		t.Errorf("Expected Workers = 12 from env, got %d", loadedCfg.Workers)
+	}
+
+	if loadedCfg.Operation != types.OperationPull {
+		t.Errorf("Expected Operation = %q from env, got %q", types.OperationPull, loadedCfg.Operation)
+	}
+}
+
+func TestLoadConfigFlagOverridesEnv(t *testing.T) {
+	viper.Reset()
+
+	t.Setenv("GIT_HERD_WORKERS", "3")
+
+	cmd := &cobra.Command{}
+	cfg := DefaultConfig()
+	SetupFlags(cmd, cfg)
+
+	if err := cmd.Flags().Parse([]string{"--workers", "9"}); err != nil {
+		t.Fatalf("Failed to parse flags: %v", err)
+	}
+
+	if err := SetupViper(cmd); err != nil {
+		t.Fatalf("SetupViper() error = %v", err)
+	}
+
+	loadedCfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if loadedCfg.Workers != 9 {
+		t.Errorf("Expected Workers = 9 from flag, got %d", loadedCfg.Workers)
 	}
 }
 
@@ -404,63 +462,71 @@ func TestConfigValidation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		modify func(*types.Config)
-		valid  bool
+		name    string
+		modify  func(*types.Config)
+		wantErr bool
+		check   func(*types.Config) error
 	}{
 		{
-			name:   "valid default config",
-			modify: func(*types.Config) {}, // No changes
-			valid:  true,
+			name:    "valid default config",
+			modify:  func(*types.Config) {},
+			wantErr: false,
 		},
 		{
 			name: "zero workers",
 			modify: func(cfg *types.Config) {
 				cfg.Workers = 0
 			},
-			valid: true, // Currently no validation, but should be noted
+			wantErr: true,
 		},
 		{
 			name: "negative workers",
 			modify: func(cfg *types.Config) {
 				cfg.Workers = -1
 			},
-			valid: true, // Currently no validation, but should be noted
-		},
-		{
-			name: "very high workers",
-			modify: func(cfg *types.Config) {
-				cfg.Workers = 1000
-			},
-			valid: true,
-		},
-		{
-			name: "zero timeout",
-			modify: func(cfg *types.Config) {
-				cfg.Timeout = 0
-			},
-			valid: true,
+			wantErr: true,
 		},
 		{
 			name: "negative timeout",
 			modify: func(cfg *types.Config) {
 				cfg.Timeout = -1 * time.Second
 			},
-			valid: true, // Currently no validation
+			wantErr: true,
 		},
 		{
-			name: "empty exclude dirs",
+			name: "export scan requires scan operation",
+			modify: func(cfg *types.Config) {
+				cfg.ExportScan = "report.md"
+				cfg.Operation = types.OperationFetch
+			},
+			wantErr: true,
+		},
+		{
+			name: "operation normalization",
+			modify: func(cfg *types.Config) {
+				cfg.Operation = "PULL"
+			},
+			wantErr: false,
+			check: func(cfg *types.Config) error {
+				if cfg.Operation != types.OperationPull {
+					return fmt.Errorf("expected %q, got %q", types.OperationPull, cfg.Operation)
+				}
+				return nil
+			},
+		},
+		{
+			name: "empty exclude dirs allowed",
 			modify: func(cfg *types.Config) {
 				cfg.ExcludeDirs = []string{}
 			},
-			valid: true,
+			wantErr: false,
 		},
 		{
-			name: "nil exclude dirs",
+			name: "nil exclude dirs allowed",
 			modify: func(cfg *types.Config) {
 				cfg.ExcludeDirs = nil
 			},
-			valid: true,
+			wantErr: false,
 		},
 	}
 
@@ -471,16 +537,17 @@ func TestConfigValidation(t *testing.T) {
 			cfg := DefaultConfig()
 			tt.modify(cfg)
 
-			// Since there's no validation function currently, we just check
-			// that the config can be created and used
-			if cfg == nil {
-				t.Error("Config became nil after modification")
+			err := ValidateConfig(cfg)
+			if tt.wantErr && err == nil {
+				t.Errorf("expected validation error, got nil")
 			}
-
-			// This test documents current behavior - in the future,
-			// proper validation should be added
-			if !tt.valid {
-				t.Log("This configuration should be invalid but currently no validation exists")
+			if !tt.wantErr && err != nil {
+				t.Errorf("expected no validation error, got %v", err)
+			}
+			if err == nil && tt.check != nil {
+				if checkErr := tt.check(cfg); checkErr != nil {
+					t.Error(checkErr)
+				}
 			}
 		})
 	}
