@@ -162,5 +162,14 @@ func ValidateConfig(config *types.Config) error {
 		return fmt.Errorf("export-scan requires operation 'scan'")
 	}
 
+	for _, pattern := range config.DiscardFiles {
+		if strings.TrimSpace(pattern) == "" {
+			return fmt.Errorf("discard-files contains an empty pattern")
+		}
+		if _, err := filepath.Match(pattern, "placeholder"); err != nil {
+			return fmt.Errorf("invalid discard-files pattern %q: %w", pattern, err)
+		}
+	}
+
 	return nil
 }

@@ -59,13 +59,14 @@ found in the specified directory and its subdirectories.`,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Setup signal handling for graceful shutdown
-			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-			defer cancel()
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
 
 			// Add timeout if specified
 			if cfg.Timeout > 0 {
-				ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
-				defer cancel()
+				var timeoutCancel context.CancelFunc
+				ctx, timeoutCancel = context.WithTimeout(ctx, cfg.Timeout)
+				defer timeoutCancel()
 			}
 
 			// Determine root path
@@ -74,14 +75,12 @@ found in the specified directory and its subdirectories.`,
 				rootPath = args[0]
 			}
 
-			// Validate path
-			info, err := os.Stat(rootPath)
+			// Validate path using a root handle
+			root, err := os.OpenRoot(rootPath)
 			if err != nil {
-				return fmt.Errorf("stat path %s: %w", rootPath, err)
+				return fmt.Errorf("open root %s: %w", rootPath, err)
 			}
-			if !info.IsDir() {
-				return fmt.Errorf("path is not a directory: %s", rootPath)
-			}
+			defer root.Close()
 
 			// Create and execute manager
 			manager := worker.New(cfg)

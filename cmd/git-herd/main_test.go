@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -129,9 +130,8 @@ func TestRootCommandInvalidPath(t *testing.T) {
 		t.Error("Expected error for non-existent path, got nil")
 	}
 
-	expectedError := "stat path /non/existent/path:"
-	if !strings.Contains(err.Error(), expectedError) {
-		t.Errorf("Expected error to contain %q, got %q", expectedError, err.Error())
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Expected os.ErrNotExist, got %v", err)
 	}
 }
 
@@ -290,6 +290,7 @@ func TestArgumentHandling(t *testing.T) {
 		args     []string
 		wantErr  bool
 		errMatch string
+		errIs    error
 	}{
 		{
 			name:    "no arguments",
@@ -302,10 +303,10 @@ func TestArgumentHandling(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:     "non-existent path",
-			args:     []string{"--dry-run", "--plain", "/non/existent/path"},
-			wantErr:  true,
-			errMatch: "stat path",
+			name:    "non-existent path",
+			args:    []string{"--dry-run", "--plain", "/non/existent/path"},
+			wantErr: true,
+			errIs:   os.ErrNotExist,
 		},
 		{
 			name:     "too many arguments",
@@ -338,6 +339,12 @@ func TestArgumentHandling(t *testing.T) {
 			if tt.errMatch != "" && err != nil {
 				if !strings.Contains(err.Error(), tt.errMatch) {
 					t.Errorf("Expected error to contain %q, got %q", tt.errMatch, err.Error())
+				}
+			}
+
+			if tt.errIs != nil && err != nil {
+				if !errors.Is(err, tt.errIs) {
+					t.Errorf("Expected error to satisfy %v, got %v", tt.errIs, err)
 				}
 			}
 		})

@@ -2,7 +2,11 @@ package git
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -28,9 +32,17 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string, onProgress fun
 	var mu sync.Mutex
 	var foundCount int
 
-	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("open root %s: %w", rootPath, err)
+	}
+	defer root.Close()
+
+	rootFS := root.FS()
+
+	err = fs.WalkDir(rootFS, ".", func(entryPath string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 
 		// Check for context cancellation
@@ -46,21 +58,23 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string, onProgress fun
 		}
 
 		// Check if we should exclude this directory
-		for _, exclude := range s.config.ExcludeDirs {
-			if strings.Contains(path, exclude) {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
+		if s.isExcludedPath(entryPath) {
+			if entryPath == "." {
 				return nil
 			}
+			return fs.SkipDir
 		}
 
 		// Check if this is a git repository
-		gitPath := filepath.Join(path, ".git")
-		if _, err := os.Stat(gitPath); err == nil {
+		gitPath := path.Join(entryPath, ".git")
+		if _, err := root.Stat(gitPath); err == nil {
+			repoPath := rootPath
+			if entryPath != "." {
+				repoPath = filepath.Join(rootPath, filepath.FromSlash(entryPath))
+			}
 			repo := types.GitRepo{
-				Path:   path,
-				Name:   filepath.Base(path),
+				Path:   repoPath,
+				Name:   filepath.Base(repoPath),
 				HasGit: true,
 			}
 
@@ -77,12 +91,37 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string, onProgress fun
 
 			// Skip subdirectories if not recursive
 			if !s.config.Recursive {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
+		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
 		}
 
 		return nil
 	})
 
 	return repos, err
+}
+
+func (s *Scanner) isExcludedPath(entryPath string) bool {
+	if len(s.config.ExcludeDirs) == 0 {
+		return false
+	}
+
+	segments := strings.Split(entryPath, "/")
+	for _, segment := range segments {
+		if segment == "." || segment == "" {
+			continue
+		}
+		for _, exclude := range s.config.ExcludeDirs {
+			if exclude == "" {
+				continue
+			}
+			if segment == exclude {
+				return true
+			}
+		}
+	}
+
+	return false
 }

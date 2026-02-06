@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -55,7 +56,7 @@ func (p *Processor) AnalyzeRepo(repo *types.GitRepo) {
 	// Get last commit information
 	commit, err := gitRepo.CommitObject(head.Hash())
 	if err == nil {
-		repo.LastCommit = head.Hash().String()[:8] // Short hash
+		repo.LastCommit = head.Hash().String()[:8]                  // Short hash
 		repo.LastCommitMsg = strings.Split(commit.Message, "\n")[0] // First line only
 	}
 
@@ -122,7 +123,7 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 
 	// Skip dirty repos if configured (but not for scan operation)
 	if p.config.SkipDirty && !repo.Clean && p.config.Operation != types.OperationScan {
-		repo.Error = fmt.Errorf("repository has uncommitted changes (skipped)")
+		repo.Error = fmt.Errorf("%w: uncommitted changes", types.ErrRepoSkipped)
 		return repo
 	}
 
@@ -160,7 +161,7 @@ func (p *Processor) fetchRepo(ctx context.Context, repo *gogit.Repository) error
 		Progress:   nil, // We could add progress reporting here
 	})
 
-	if err != nil && err != gogit.NoErrAlreadyUpToDate {
+	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("fetch failed: %w", err)
 	}
 
@@ -179,7 +180,7 @@ func (p *Processor) pullRepo(ctx context.Context, repo *gogit.Repository) error 
 		Progress:   nil,
 	})
 
-	if err != nil && err != gogit.NoErrAlreadyUpToDate {
+	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("pull failed: %w", err)
 	}
 
@@ -212,7 +213,10 @@ func (p *Processor) discardFiles(gitRepo *gogit.Repository, repo *types.GitRepo)
 		for _, pattern := range p.config.DiscardFiles {
 			// Support both exact matches and glob patterns
 			matched, err := filepath.Match(pattern, filepath.Base(file))
-			if err == nil && matched {
+			if err != nil {
+				return fmt.Errorf("invalid discard pattern %q: %w", pattern, err)
+			}
+			if matched {
 				shouldDiscard = true
 				break
 			}

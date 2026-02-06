@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -48,7 +48,7 @@ func New(config *types.Config) *Manager {
 func (m *Manager) Execute(ctx context.Context, rootPath string) error {
 	// Use TUI if not in plain mode and not verbose (TUI doesn't work well with verbose logging)
 	if !m.config.PlainMode && !m.config.Verbose {
-		model := tui.NewModel(m.config, rootPath)
+		model := tui.NewModel(ctx, m.config, rootPath)
 		p := tea.NewProgram(model)
 
 		if _, err := p.Run(); err != nil {
@@ -104,6 +104,7 @@ func (m *Manager) processReposConcurrently(ctx context.Context, repos []types.Gi
 	g.SetLimit(m.config.Workers)
 
 	resultChan := make(chan types.GitRepo, len(repos))
+	groupErrChan := make(chan error, 1)
 
 	// Start workers
 	for _, repo := range repos {
@@ -121,14 +122,21 @@ func (m *Manager) processReposConcurrently(ctx context.Context, repos []types.Gi
 
 	// Start result collector
 	go func() {
-		defer close(resultChan)
-		if err := g.Wait(); err != nil {
+		err := g.Wait()
+		if err != nil {
 			m.logger.Error("Worker group failed", "error", err)
 		}
+		groupErrChan <- err
+		close(resultChan)
 	}()
 
 	// Collect and display results
-	return m.displayResults(ctx, resultChan, len(repos))
+	resultErr := m.displayResults(ctx, resultChan, len(repos))
+	groupErr := <-groupErrChan
+	if groupErr != nil {
+		return errors.Join(groupErr, resultErr)
+	}
+	return resultErr
 }
 
 // displayResults shows the results of the operations
@@ -143,7 +151,7 @@ func (m *Manager) displayResults(ctx context.Context, resultChan <-chan types.Gi
 		allResults = append(allResults, result)
 
 		if result.Error != nil {
-			if strings.Contains(result.Error.Error(), "skipped") {
+			if errors.Is(result.Error, types.ErrRepoSkipped) {
 				skipped++
 			} else {
 				failed++
@@ -195,10 +203,12 @@ func (m *Manager) displayResults(ctx context.Context, resultChan <-chan types.Gi
 	fmt.Printf("📈 Summary: %d successful, %d failed, %d skipped, %d total\n", successful, failed, skipped, total)
 
 	// Save report to file if requested
+	var finalErr error
 	if m.config.SaveReport != "" {
-		if err := m.saveReport(allResults, successful, failed, skipped); err != nil {
+		if err := tui.SaveReport(m.config, allResults, successful, failed, skipped); err != nil {
 			m.logger.ErrorContext(ctx, "Failed to save report", "error", err)
 			fmt.Fprintf(os.Stderr, "Error saving report: %v\n", err)
+			finalErr = errors.Join(finalErr, err)
 		} else {
 			fmt.Printf("📄 Detailed report saved to: %s\n", m.config.SaveReport)
 		}
@@ -209,6 +219,7 @@ func (m *Manager) displayResults(ctx context.Context, resultChan <-chan types.Gi
 		if err := m.exportScanToMarkdown(allResults, m.config.ExportScan); err != nil {
 			m.logger.ErrorContext(ctx, "Failed to export scan", "error", err)
 			fmt.Fprintf(os.Stderr, "Error exporting scan: %v\n", err)
+			finalErr = errors.Join(finalErr, err)
 		} else {
 			fmt.Printf("📋 Scan report exported to: %s\n", m.config.ExportScan)
 		}
@@ -219,16 +230,16 @@ func (m *Manager) displayResults(ctx context.Context, resultChan <-chan types.Gi
 	}
 
 	if failed > 0 {
-		return fmt.Errorf("%d repositories failed", failed)
+		finalErr = errors.Join(finalErr, fmt.Errorf("%d repositories failed", failed))
 	}
 
-	return nil
+	return finalErr
 }
 
 // displaySingleResult displays a single repository result
 func (m *Manager) displaySingleResult(result types.GitRepo, isFirst bool) {
 	if result.Error != nil {
-		if strings.Contains(result.Error.Error(), "skipped") {
+		if errors.Is(result.Error, types.ErrRepoSkipped) {
 			fmt.Printf("⊝ %s (%s): %v\n", result.Name, result.Path, result.Error)
 		} else {
 			fmt.Printf("❌ %s (%s): %v\n", result.Name, result.Path, result.Error)
@@ -243,88 +254,22 @@ func (m *Manager) displaySingleResult(result types.GitRepo, isFirst bool) {
 	}
 }
 
-// saveReport saves a detailed report to a file
-func (m *Manager) saveReport(results []types.GitRepo, successful, failed, skipped int) (err error) {
-	file, err := os.Create(m.config.SaveReport)
-	if err != nil {
-		return fmt.Errorf("failed to create report file: %w", err)
-	}
-	defer func() {
-		err = errors.Join(err, file.Close())
-	}()
-
-	// Write header
-	if _, err := fmt.Fprintf(file, "git-herd Report - %s\n", time.Now().Format("2006-01-02 15:04:05")); err != nil {
-		return fmt.Errorf("failed to write report header: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, "Operation: %s\n", m.config.Operation); err != nil {
-		return fmt.Errorf("failed to write operation: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, "Workers: %d\n", m.config.Workers); err != nil {
-		return fmt.Errorf("failed to write workers: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, "Total Repositories: %d\n", len(results)); err != nil {
-		return fmt.Errorf("failed to write total repositories: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, "Successful: %d, Failed: %d, Skipped: %d\n\n", successful, failed, skipped); err != nil {
-		return fmt.Errorf("failed to write summary: %w", err)
-	}
-
-	if _, err := fmt.Fprintf(file, "Repository Details:\n"); err != nil {
-		return fmt.Errorf("failed to write details header: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, "==================\n\n"); err != nil {
-		return fmt.Errorf("failed to write details separator: %w", err)
-	}
-
-	for _, result := range results {
-		if _, err := fmt.Fprintf(file, "Repository: %s\n", result.Name); err != nil {
-			return fmt.Errorf("failed to write repository name: %w", err)
-		}
-		if _, err := fmt.Fprintf(file, "Path: %s\n", result.Path); err != nil {
-			return fmt.Errorf("failed to write repository path: %w", err)
-		}
-
-		if result.Branch != "" {
-			if _, err := fmt.Fprintf(file, "Branch: %s\n", result.Branch); err != nil {
-				return fmt.Errorf("failed to write branch: %w", err)
-			}
-		}
-		if result.Remote != "" {
-			if _, err := fmt.Fprintf(file, "Remote: %s\n", result.Remote); err != nil {
-				return fmt.Errorf("failed to write remote: %w", err)
-			}
-		}
-
-		if _, err := fmt.Fprintf(file, "Duration: %v\n", result.Duration.Truncate(time.Millisecond)); err != nil {
-			return fmt.Errorf("failed to write duration: %w", err)
-		}
-
-		if result.Error != nil {
-			if _, err := fmt.Fprintf(file, "Status: FAILED - %v\n", result.Error); err != nil {
-				return fmt.Errorf("failed to write failed status: %w", err)
-			}
-		} else if m.config.DryRun {
-			if _, err := fmt.Fprintf(file, "Status: DRY RUN - Would have succeeded\n"); err != nil {
-				return fmt.Errorf("failed to write dry run status: %w", err)
-			}
-		} else {
-			if _, err := fmt.Fprintf(file, "Status: SUCCESS\n"); err != nil {
-				return fmt.Errorf("failed to write success status: %w", err)
-			}
-		}
-
-		if _, err := fmt.Fprintf(file, "\n"); err != nil {
-			return fmt.Errorf("failed to write separator: %w", err)
-		}
-	}
-
-	return nil
-}
-
 // exportScanToMarkdown exports repository scan results to a markdown file
 func (m *Manager) exportScanToMarkdown(results []types.GitRepo, filePath string) (err error) {
-	file, err := os.Create(filePath)
+	rootDir := filepath.Dir(filePath)
+	fileName := filepath.Base(filePath)
+	if fileName == "." || fileName == string(os.PathSeparator) {
+		return fmt.Errorf("export file path is invalid: %s", filePath)
+	}
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to create export file: %w", err)
+	}
+	defer func() {
+		err = errors.Join(err, root.Close())
+	}()
+
+	file, err := root.OpenFile(fileName, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to create export file: %w", err)
 	}
@@ -332,79 +277,62 @@ func (m *Manager) exportScanToMarkdown(results []types.GitRepo, filePath string)
 		err = errors.Join(err, file.Close())
 	}()
 
+	var writeErr error
+	writef := func(label, format string, a ...any) {
+		if writeErr != nil {
+			return
+		}
+		_, writeErr = fmt.Fprintf(file, format, a...)
+		if writeErr != nil {
+			writeErr = fmt.Errorf("failed to write %s: %w", label, writeErr)
+		}
+	}
+
 	// Write header
-	if _, err := fmt.Fprintf(file, "# Git Repository Scan Report\n\n"); err != nil {
-		return fmt.Errorf("failed to write header: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, "Generated: %s\n\n", time.Now().Format("2006-01-02 15:04:05")); err != nil {
-		return fmt.Errorf("failed to write timestamp: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, "Total Repositories: %d\n\n", len(results)); err != nil {
-		return fmt.Errorf("failed to write total: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, "---\n\n"); err != nil {
-		return fmt.Errorf("failed to write separator: %w", err)
-	}
+	writef("header", "# Git Repository Scan Report\n\n")
+	writef("timestamp", "Generated: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
+	writef("total", "Total Repositories: %d\n\n", len(results))
+	writef("separator", "---\n\n")
 
 	// Write repository details
 	for _, repo := range results {
-		if _, err := fmt.Fprintf(file, "## %s\n\n", repo.Name); err != nil {
-			return fmt.Errorf("failed to write repo name: %w", err)
-		}
-		if _, err := fmt.Fprintf(file, "**Path:** `%s`\n\n", repo.Path); err != nil {
-			return fmt.Errorf("failed to write path: %w", err)
-		}
+		writef("repo name", "## %s\n\n", repo.Name)
+		writef("path", "**Path:** `%s`\n\n", repo.Path)
 
 		if repo.Branch != "" {
-			if _, err := fmt.Fprintf(file, "**Branch:** %s\n\n", repo.Branch); err != nil {
-				return fmt.Errorf("failed to write branch: %w", err)
-			}
+			writef("branch", "**Branch:** %s\n\n", repo.Branch)
 		}
 
 		if repo.Remote != "" {
-			if _, err := fmt.Fprintf(file, "**Remote:** %s\n\n", repo.Remote); err != nil {
-				return fmt.Errorf("failed to write remote: %w", err)
-			}
+			writef("remote", "**Remote:** %s\n\n", repo.Remote)
 		}
 
 		if repo.LastCommit != "" {
-			if _, err := fmt.Fprintf(file, "**Last Commit:** `%s`\n\n", repo.LastCommit); err != nil {
-				return fmt.Errorf("failed to write commit: %w", err)
-			}
+			writef("commit", "**Last Commit:** `%s`\n\n", repo.LastCommit)
 			if repo.LastCommitMsg != "" {
-				if _, err := fmt.Fprintf(file, "**Commit Message:** %s\n\n", repo.LastCommitMsg); err != nil {
-					return fmt.Errorf("failed to write commit message: %w", err)
-				}
+				writef("commit message", "**Commit Message:** %s\n\n", repo.LastCommitMsg)
 			}
 		}
 
 		if len(repo.ModifiedFiles) > 0 {
-			if _, err := fmt.Fprintf(file, "**Modified Files:**\n\n"); err != nil {
-				return fmt.Errorf("failed to write modified files header: %w", err)
-			}
+			writef("modified files header", "**Modified Files:**\n\n")
 			for _, modFile := range repo.ModifiedFiles {
-				if _, err := fmt.Fprintf(file, "- `%s`\n", modFile); err != nil {
-					return fmt.Errorf("failed to write modified file: %w", err)
-				}
+				writef("modified file", "- `%s`\n", modFile)
 			}
-			if _, err := fmt.Fprintf(file, "\n"); err != nil {
-				return fmt.Errorf("failed to write newline: %w", err)
-			}
+			writef("modified files newline", "\n")
 		} else {
-			if _, err := fmt.Fprintf(file, "**Status:** Clean (no local changes)\n\n"); err != nil {
-				return fmt.Errorf("failed to write clean status: %w", err)
-			}
+			writef("clean status", "**Status:** Clean (no local changes)\n\n")
 		}
 
 		if repo.Error != nil {
-			if _, err := fmt.Fprintf(file, "**Error:** %v\n\n", repo.Error); err != nil {
-				return fmt.Errorf("failed to write error: %w", err)
-			}
+			writef("error", "**Error:** %v\n\n", repo.Error)
 		}
 
-		if _, err := fmt.Fprintf(file, "---\n\n"); err != nil {
-			return fmt.Errorf("failed to write separator: %w", err)
-		}
+		writef("separator", "---\n\n")
+	}
+
+	if writeErr != nil {
+		return writeErr
 	}
 
 	return nil

@@ -1,6 +1,8 @@
 package types
 
 import (
+	"errors"
+	"fmt"
 	"time"
 )
 
@@ -12,6 +14,8 @@ const (
 	OperationPull  OperationType = "pull"
 	OperationScan  OperationType = "scan"
 )
+
+var ErrRepoSkipped = errors.New("repository skipped")
 
 // GitRepo represents a git repository with its path and status
 type GitRepo struct {
@@ -28,7 +32,6 @@ type GitRepo struct {
 	ModifiedFiles []string // List of modified files
 }
 
-// Config holds application configuration
 // Config holds application configuration
 type Config struct {
 	Workers      int           `mapstructure:"workers" json:"workers,omitzero"`
@@ -67,5 +70,19 @@ type ProcessingStats struct {
 
 // Summary returns a formatted summary of the stats
 func (s *ProcessingStats) Summary() string {
-	return ""
+	if s == nil {
+		return ""
+	}
+
+	duration := time.Duration(0)
+	if !s.StartTime.IsZero() && !s.EndTime.IsZero() && s.EndTime.After(s.StartTime) {
+		duration = s.EndTime.Sub(s.StartTime).Truncate(time.Millisecond)
+	}
+
+	summary := fmt.Sprintf("Processed %d repositories", s.Total)
+	if duration > 0 {
+		summary = fmt.Sprintf("%s in %s", summary, duration)
+	}
+
+	return fmt.Sprintf("%s: %d successful, %d failed, %d skipped", summary, s.Successful, s.Failed, s.Skipped)
 }

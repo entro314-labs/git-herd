@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -22,7 +23,7 @@ func TestNewModel(t *testing.T) {
 	cfg := config.DefaultConfig()
 	rootPath := "/test/path"
 
-	model := NewModel(cfg, rootPath)
+	model := NewModel(context.Background(), cfg, rootPath)
 
 	// Test basic initialization
 	if model == nil {
@@ -86,7 +87,7 @@ func TestNewModelWithTimeout(t *testing.T) {
 	cfg.Timeout = 5 * time.Second
 	rootPath := "/test/path"
 
-	model := NewModel(cfg, rootPath)
+	model := NewModel(context.Background(), cfg, rootPath)
 
 	if model.ctx == nil {
 		t.Error("Expected context to be initialized")
@@ -107,7 +108,7 @@ func TestModelInit(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	cmd := model.Init()
 	if cmd == nil {
@@ -123,7 +124,7 @@ func TestModelUpdateKeyMessages(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	tests := []struct {
 		name    string
@@ -171,7 +172,7 @@ func TestModelUpdateSpinnerTick(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	// Create a spinner tick message
 	tickMsg := spinner.TickMsg{
@@ -193,7 +194,7 @@ func TestModelUpdateReposFound(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	repos := []types.GitRepo{
 		{
@@ -246,7 +247,7 @@ func TestModelUpdateReposFoundEmpty(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	msg := reposFoundMsg([]types.GitRepo{})
 	newModel, cmd := model.Update(msg)
@@ -272,7 +273,7 @@ func TestModelUpdateRepoProcessed(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	// Set up model with repos
 	model.repos = []types.GitRepo{
@@ -321,7 +322,7 @@ func TestModelUpdateRepoProcessedComplete(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	// Set up model with one repo
 	model.repos = []types.GitRepo{
@@ -365,7 +366,7 @@ func TestModelUpdateProcessingDone(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	testErr := errors.New("processing error")
 	msg := processingDoneMsg{err: testErr}
@@ -418,7 +419,7 @@ func TestModelProcessMethods(t *testing.T) {
 		}
 	}()
 
-	model := NewModel(cfg, tmpDir)
+	model := NewModel(context.Background(), cfg, tmpDir)
 
 	// Test scanRepos
 	cmd := model.scanRepos()
@@ -452,7 +453,7 @@ func TestModelProcessReposEmpty(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	// Empty repos list
 	model.repos = []types.GitRepo{}
@@ -483,7 +484,7 @@ func TestModelProcessNextRepo(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.DryRun = true
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	// Set up repos
 	model.repos = []types.GitRepo{
@@ -506,7 +507,7 @@ func TestModelProcessNextRepoComplete(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	// Set up repos with all processed
 	model.repos = []types.GitRepo{
@@ -557,7 +558,7 @@ func TestModelCancel(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	// Test that context is not cancelled initially
 	select {
@@ -586,7 +587,7 @@ func TestModelConcurrency(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Timeout = 1 * time.Second
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	// Test that multiple operations can be performed safely
 	done := make(chan bool, 2)
@@ -628,14 +629,14 @@ func BenchmarkNewModel(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		model := NewModel(cfg, "/test/path")
+		model := NewModel(context.Background(), cfg, "/test/path")
 		model.cancel() // Clean up context
 	}
 }
 
 func BenchmarkModelUpdate(b *testing.B) {
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 	defer model.cancel()
 
 	tickMsg := spinner.TickMsg{Time: time.Now(), ID: 1}
@@ -648,7 +649,7 @@ func BenchmarkModelUpdate(b *testing.B) {
 
 func BenchmarkRepoProcessedUpdate(b *testing.B) {
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 	defer model.cancel()
 
 	// Set up repos for processing

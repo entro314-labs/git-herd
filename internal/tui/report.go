@@ -4,14 +4,33 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/entro314-labs/git-herd/pkg/types"
 )
 
-// saveReport saves a detailed report to a file
-func saveReport(config *types.Config, results []types.GitRepo, successful, failed, skipped int) (err error) {
-	file, err := os.Create(config.SaveReport)
+// SaveReport saves a detailed report to a file
+func SaveReport(config *types.Config, results []types.GitRepo, successful, failed, skipped int) (err error) {
+	if strings.TrimSpace(config.SaveReport) == "" {
+		return fmt.Errorf("report file path is empty")
+	}
+
+	rootDir := filepath.Dir(config.SaveReport)
+	fileName := filepath.Base(config.SaveReport)
+	if fileName == "." || fileName == string(os.PathSeparator) {
+		return fmt.Errorf("report file path is invalid: %s", config.SaveReport)
+	}
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		return fmt.Errorf("failed to create report file: %w", err)
+	}
+	defer func() {
+		err = errors.Join(err, root.Close())
+	}()
+
+	file, err := root.OpenFile(fileName, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to create report file: %w", err)
 	}

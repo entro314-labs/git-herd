@@ -41,10 +41,24 @@ type processingDoneMsg struct {
 	err error
 }
 
-func NewModel(config *types.Config, rootPath string) *Model {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewModel(parentCtx context.Context, config *types.Config, rootPath string) *Model {
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+
+	baseCtx := parentCtx
+	var timeoutCancel context.CancelFunc
 	if config.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, config.Timeout)
+		baseCtx, timeoutCancel = context.WithTimeout(baseCtx, config.Timeout)
+	}
+
+	ctx, cancel := context.WithCancel(baseCtx)
+	combinedCancel := cancel
+	if timeoutCancel != nil {
+		combinedCancel = func() {
+			cancel()
+			timeoutCancel()
+		}
 	}
 
 	s := spinner.New()
@@ -57,7 +71,7 @@ func NewModel(config *types.Config, rootPath string) *Model {
 		config:    config,
 		rootPath:  rootPath,
 		ctx:       ctx,
-		cancel:    cancel,
+		cancel:    combinedCancel,
 		scanner:   git.NewScanner(config),
 		processor: git.NewProcessor(config),
 		phase:     "initializing",
@@ -107,6 +121,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.repos) == 0 {
 			m.done = true
 			m.phase = "complete"
+			m.cancel()
 			return m, tea.Quit
 		}
 
@@ -120,6 +135,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.processing = false
 			m.done = true
 			m.phase = "complete"
+			m.cancel()
 			return m, tea.Sequence(
 				tea.Printf("\n"),
 				tea.Quit,
@@ -137,6 +153,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.done = true
 		m.phase = "complete"
 		m.err = msg.err
+		m.cancel()
 		return m, tea.Sequence(
 			tea.Printf("\n"),
 			tea.Quit,

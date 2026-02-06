@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -104,7 +105,7 @@ func TestModelView(t *testing.T) {
 			t.Parallel()
 
 			// Create a copy of the model for this test
-			testModel := NewModel(cfg, "/test/path")
+			testModel := NewModel(context.Background(), cfg, "/test/path")
 			tt.setupModel(testModel)
 
 			view := testModel.View()
@@ -128,7 +129,7 @@ func TestModelViewDone(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 	model.done = true
 
 	view := model.View()
@@ -254,7 +255,7 @@ func TestModelRenderSummary(t *testing.T) {
 					{
 						Path:  "/test/repo2",
 						Name:  "repo2",
-						Error: &testError{msg: "skipped: dirty working directory"},
+						Error: fmt.Errorf("%w: dirty working directory", types.ErrRepoSkipped),
 					},
 				}
 			},
@@ -263,7 +264,7 @@ func TestModelRenderSummary(t *testing.T) {
 				"repo1",
 				"⊝",
 				"repo2",
-				"skipped: dirty working directory",
+				"repository skipped: dirty working directory",
 				"1 successful",
 				"0 failed",
 				"1 skipped",
@@ -299,7 +300,7 @@ func TestModelRenderSummary(t *testing.T) {
 			t.Parallel()
 
 			cfg := config.DefaultConfig()
-			model := NewModel(cfg, "/test/path")
+			model := NewModel(context.Background(), cfg, "/test/path")
 			model.done = true
 			tt.setupModel(model)
 
@@ -337,7 +338,7 @@ func TestModelRenderSummaryWithReport(t *testing.T) {
 
 	cfg.SaveReport = tmpFile.Name()
 
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 	model.done = true
 	model.repos = []types.GitRepo{
 		{Path: "/test/repo1", Name: "repo1"},
@@ -369,7 +370,7 @@ func TestViewStyles(t *testing.T) {
 
 	// Test that styles are properly initialized and don't panic when used
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	// Test different view states to exercise style usage
 	model.phase = "initializing"
@@ -396,7 +397,7 @@ func TestViewProgress(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 	model.phase = "processing"
 	model.repos = make([]types.GitRepo, 10)
 	for i := 0; i < 10; i++ {
@@ -431,7 +432,7 @@ func TestViewRecentResults(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 	model.phase = "processing"
 	model.repos = make([]types.GitRepo, 5)
 
@@ -481,7 +482,7 @@ func TestViewOperationTitle(t *testing.T) {
 
 			cfg := config.DefaultConfig()
 			cfg.Operation = tt.operation
-			model := NewModel(cfg, "/test/path")
+			model := NewModel(context.Background(), cfg, "/test/path")
 
 			view := model.View()
 
@@ -496,7 +497,7 @@ func TestViewEmptyStates(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 
 	// Test view with no repos in processing phase
 	model.phase = "processing"
@@ -529,7 +530,7 @@ func (e *testError) Error() string {
 // Benchmark tests
 func BenchmarkModelView(b *testing.B) {
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 	defer model.cancel()
 
 	// Set up a typical processing state
@@ -554,7 +555,7 @@ func BenchmarkModelView(b *testing.B) {
 
 func BenchmarkModelRenderSummary(b *testing.B) {
 	cfg := config.DefaultConfig()
-	model := NewModel(cfg, "/test/path")
+	model := NewModel(context.Background(), cfg, "/test/path")
 	defer model.cancel()
 
 	// Set up results for summary

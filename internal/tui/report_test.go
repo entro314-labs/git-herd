@@ -62,9 +62,9 @@ func TestSaveReport(t *testing.T) {
 		},
 	}
 
-	err = saveReport(cfg, results, 2, 1, 0)
+	err = SaveReport(cfg, results, 2, 1, 0)
 	if err != nil {
-		t.Errorf("saveReport() error = %v", err)
+		t.Errorf("SaveReport() error = %v", err)
 	}
 
 	// Read the file content
@@ -150,9 +150,9 @@ func TestSaveReportDryRun(t *testing.T) {
 		},
 	}
 
-	err = saveReport(cfg, results, 1, 0, 0)
+	err = SaveReport(cfg, results, 1, 0, 0)
 	if err != nil {
-		t.Errorf("saveReport() error = %v", err)
+		t.Errorf("SaveReport() error = %v", err)
 	}
 
 	content, err := os.ReadFile(tmpFile.Name())
@@ -199,9 +199,9 @@ func TestSaveReportWithEmptyFields(t *testing.T) {
 		},
 	}
 
-	err = saveReport(cfg, results, 1, 0, 0)
+	err = SaveReport(cfg, results, 1, 0, 0)
 	if err != nil {
-		t.Errorf("saveReport() error = %v", err)
+		t.Errorf("SaveReport() error = %v", err)
 	}
 
 	content, err := os.ReadFile(tmpFile.Name())
@@ -243,7 +243,7 @@ func TestSaveReportCreateFileError(t *testing.T) {
 		{Path: "/test/repo1", Name: "repo1"},
 	}
 
-	err := saveReport(cfg, results, 1, 0, 0)
+	err := SaveReport(cfg, results, 1, 0, 0)
 	if err == nil {
 		t.Error("Expected error when creating file in invalid path")
 	}
@@ -277,9 +277,9 @@ func TestSaveReportEmptyResults(t *testing.T) {
 	// Empty results
 	results := []types.GitRepo{}
 
-	err = saveReport(cfg, results, 0, 0, 0)
+	err = SaveReport(cfg, results, 0, 0, 0)
 	if err != nil {
-		t.Errorf("saveReport() error = %v", err)
+		t.Errorf("SaveReport() error = %v", err)
 	}
 
 	content, err := os.ReadFile(tmpFile.Name())
@@ -332,9 +332,9 @@ func TestSaveReportLargeResults(t *testing.T) {
 		}
 	}
 
-	err = saveReport(cfg, results, 1000, 0, 0)
+	err = SaveReport(cfg, results, 1000, 0, 0)
 	if err != nil {
-		t.Errorf("saveReport() error = %v", err)
+		t.Errorf("SaveReport() error = %v", err)
 	}
 
 	content, err := os.ReadFile(tmpFile.Name())
@@ -416,9 +416,9 @@ func TestSaveReportDurationFormatting(t *testing.T) {
 				},
 			}
 
-			err := saveReport(cfg, results, 1, 0, 0)
+			err := SaveReport(cfg, results, 1, 0, 0)
 			if err != nil {
-				t.Errorf("saveReport() error = %v", err)
+				t.Errorf("SaveReport() error = %v", err)
 			}
 
 			content, err := os.ReadFile(tmpFile.Name())
@@ -495,9 +495,9 @@ func TestSaveReportErrorHandling(t *testing.T) {
 				},
 			}
 
-			err := saveReport(cfg, results, 0, 1, 0)
+			err := SaveReport(cfg, results, 0, 1, 0)
 			if err != nil {
-				t.Errorf("saveReport() error = %v", err)
+				t.Errorf("SaveReport() error = %v", err)
 			}
 
 			content, err := os.ReadFile(tmpFile.Name())
@@ -571,9 +571,9 @@ func BenchmarkSaveReport(b *testing.B) {
 			b.Fatalf("Failed to seek file: %v", err)
 		}
 
-		err := saveReport(cfg, results, 100, 0, 0)
+		err := SaveReport(cfg, results, 100, 0, 0)
 		if err != nil {
-			b.Errorf("saveReport() error = %v", err)
+			b.Errorf("SaveReport() error = %v", err)
 		}
 	}
 }
@@ -621,9 +621,9 @@ func BenchmarkSaveReportLarge(b *testing.B) {
 			b.Fatalf("Failed to seek file: %v", err)
 		}
 
-		err := saveReport(cfg, results, 1000, 0, 0)
+		err := SaveReport(cfg, results, 1000, 0, 0)
 		if err != nil {
-			b.Errorf("saveReport() error = %v", err)
+			b.Errorf("SaveReport() error = %v", err)
 		}
 	}
 }

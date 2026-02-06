@@ -3,6 +3,7 @@ package types
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -448,19 +449,27 @@ func TestProcessingStatsSummary(t *testing.T) {
 	}
 
 	summary := stats.Summary()
+	if summary == "" {
+		t.Errorf("Expected non-empty summary, got %q", summary)
+	}
 
-	// Currently the Summary method returns empty string
-	// This test documents the current behavior and should be updated
-	// when the Summary method is implemented
-	if summary != "" {
-		t.Errorf("Expected empty summary (not implemented), got %q", summary)
+	expectedParts := []string{
+		"Processed 10 repositories",
+		"8 successful",
+		"1 failed",
+		"1 skipped",
+	}
+	for _, part := range expectedParts {
+		if !strings.Contains(summary, part) {
+			t.Errorf("Expected summary to contain %q, got %q", part, summary)
+		}
 	}
 
 	// Test that Summary method doesn't panic
 	emptyStats := ProcessingStats{}
 	emptySummary := emptyStats.Summary()
-	if emptySummary != "" {
-		t.Errorf("Expected empty summary for empty stats, got %q", emptySummary)
+	if emptySummary == "" {
+		t.Errorf("Expected non-empty summary for empty stats, got %q", emptySummary)
 	}
 }
 

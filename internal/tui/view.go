@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -8,6 +9,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"github.com/entro314-labs/git-herd/pkg/types"
 )
 
 var (
@@ -107,6 +110,16 @@ func (m *Model) View() string {
 func (m *Model) renderSummary() string {
 	var content strings.Builder
 
+	if m.err != nil {
+		content.WriteString(titleStyle.Render("git-herd"))
+		content.WriteString("\n\n")
+		content.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
+		if len(m.results) == 0 {
+			return content.String()
+		}
+		content.WriteString("\n\n")
+	}
+
 	if len(m.repos) == 0 {
 		content.WriteString(titleStyle.Render("git-herd"))
 		content.WriteString("\n\n")
@@ -125,7 +138,7 @@ func (m *Model) renderSummary() string {
 	for _, result := range m.results {
 		if result.Error != nil {
 			failed++
-			if strings.Contains(result.Error.Error(), "skipped") {
+			if errors.Is(result.Error, types.ErrRepoSkipped) {
 				content.WriteString(fmt.Sprintf("%s %s (%s): %s\n",
 					infoStyle.Render("⊝"),
 					result.Name,
@@ -160,7 +173,7 @@ func (m *Model) renderSummary() string {
 	actualFailed := 0
 	for _, result := range m.results {
 		if result.Error != nil {
-			if strings.Contains(result.Error.Error(), "skipped") {
+			if errors.Is(result.Error, types.ErrRepoSkipped) {
 				skipped++
 			} else {
 				actualFailed++
@@ -180,7 +193,9 @@ func (m *Model) renderSummary() string {
 
 	// Save report if requested
 	if m.config.SaveReport != "" {
-		if err := saveReport(m.config, m.results, successful, actualFailed, skipped); err == nil {
+		if err := SaveReport(m.config, m.results, successful, actualFailed, skipped); err != nil {
+			content.WriteString(fmt.Sprintf("\n%s Failed to save report: %v", errorStyle.Render("✗"), err))
+		} else {
 			content.WriteString(fmt.Sprintf("\n📄 Detailed report saved to: %s", m.config.SaveReport))
 		}
 	}

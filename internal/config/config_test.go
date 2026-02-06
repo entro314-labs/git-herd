@@ -515,6 +515,20 @@ func TestConfigValidation(t *testing.T) {
 			},
 		},
 		{
+			name: "invalid discard pattern",
+			modify: func(cfg *types.Config) {
+				cfg.DiscardFiles = []string{"["}
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty discard pattern",
+			modify: func(cfg *types.Config) {
+				cfg.DiscardFiles = []string{""}
+			},
+			wantErr: true,
+		},
+		{
 			name: "empty exclude dirs allowed",
 			modify: func(cfg *types.Config) {
 				cfg.ExcludeDirs = []string{}
