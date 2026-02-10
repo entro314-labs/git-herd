@@ -322,7 +322,7 @@ func TestSaveReportLargeResults(t *testing.T) {
 
 	// Create a large number of results
 	results := make([]types.GitRepo, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		results[i] = types.GitRepo{
 			Path:     fmt.Sprintf("/test/repo%d", i),
 			Name:     fmt.Sprintf("repo%d", i),
@@ -551,7 +551,7 @@ func BenchmarkSaveReport(b *testing.B) {
 
 	// Create typical results
 	results := make([]types.GitRepo, 100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		results[i] = types.GitRepo{
 			Path:     fmt.Sprintf("/test/repo%d", i),
 			Name:     fmt.Sprintf("repo%d", i),
@@ -601,7 +601,7 @@ func BenchmarkSaveReportLarge(b *testing.B) {
 
 	// Create large results set
 	results := make([]types.GitRepo, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		results[i] = types.GitRepo{
 			Path:     fmt.Sprintf("/test/repo%d", i),
 			Name:     fmt.Sprintf("repo%d", i),

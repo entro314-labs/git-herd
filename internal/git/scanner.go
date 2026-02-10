@@ -100,7 +100,11 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string, onProgress fun
 		return nil
 	})
 
-	return repos, err
+	if err != nil {
+		return nil, err
+	}
+
+	return repos, nil
 }
 
 func (s *Scanner) isExcludedPath(entryPath string) bool {
@@ -108,8 +112,8 @@ func (s *Scanner) isExcludedPath(entryPath string) bool {
 		return false
 	}
 
-	segments := strings.Split(entryPath, "/")
-	for _, segment := range segments {
+	segments := strings.SplitSeq(entryPath, "/")
+	for segment := range segments {
 		if segment == "." || segment == "" {
 			continue
 		}

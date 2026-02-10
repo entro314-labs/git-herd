@@ -191,13 +191,12 @@ func (m *Model) renderSummary() string {
 	content.WriteString("\n")
 	content.WriteString(summaryStyle.Render(summaryText))
 
-	// Save report if requested
+	// Report/export notes (saved after TUI exits)
 	if m.config.SaveReport != "" {
-		if err := SaveReport(m.config, m.results, successful, actualFailed, skipped); err != nil {
-			content.WriteString(fmt.Sprintf("\n%s Failed to save report: %v", errorStyle.Render("✗"), err))
-		} else {
-			content.WriteString(fmt.Sprintf("\n📄 Detailed report saved to: %s", m.config.SaveReport))
-		}
+		content.WriteString(fmt.Sprintf("\n📄 Report will be saved to: %s", m.config.SaveReport))
+	}
+	if m.config.ExportScan != "" {
+		content.WriteString(fmt.Sprintf("\n📋 Scan report will be exported to: %s", m.config.ExportScan))
 	}
 
 	return content.String()

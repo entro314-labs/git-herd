@@ -112,7 +112,7 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 			return repo
 		}
 
-		if err := p.discardFiles(gitRepo, &repo); err != nil {
+		if err := p.discardFiles(ctx, gitRepo, &repo); err != nil {
 			repo.Error = fmt.Errorf("failed to discard files: %w", err)
 			return repo
 		}
@@ -188,7 +188,7 @@ func (p *Processor) pullRepo(ctx context.Context, repo *gogit.Repository) error 
 }
 
 // discardFiles discards changes to specific files matching the configured patterns
-func (p *Processor) discardFiles(gitRepo *gogit.Repository, repo *types.GitRepo) error {
+func (p *Processor) discardFiles(ctx context.Context, gitRepo *gogit.Repository, repo *types.GitRepo) error {
 	worktree, err := gitRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree: %w", err)
@@ -206,6 +206,11 @@ func (p *Processor) discardFiles(gitRepo *gogit.Repository, repo *types.GitRepo)
 	for file, fileStatus := range status {
 		if fileStatus.Worktree == gogit.Unmodified && fileStatus.Staging == gogit.Unmodified {
 			continue
+		}
+
+		cleanPath := filepath.Clean(file)
+		if filepath.IsAbs(cleanPath) || cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("invalid file path from git status: %q", file)
 		}
 
 		// Check if file matches any discard pattern
@@ -236,7 +241,7 @@ func (p *Processor) discardFiles(gitRepo *gogit.Repository, repo *types.GitRepo)
 	if len(discardedFiles) > 0 {
 		for _, file := range discardedFiles {
 			// Use git command to discard changes to specific file
-			cmd := exec.Command("git", "checkout", "HEAD", "--", file)
+			cmd := exec.CommandContext(ctx, "git", "checkout", "HEAD", "--", file)
 			cmd.Dir = repo.Path
 			cmd.Env = os.Environ()
 

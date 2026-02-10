@@ -69,7 +69,7 @@ func TestSetupFlags(t *testing.T) {
 	tests := []struct {
 		name         string
 		shortFlag    string
-		defaultValue interface{}
+		defaultValue any
 	}{
 		{"operation", "o", "fetch"},
 		{"workers", "w", 5},

@@ -594,7 +594,7 @@ func TestModelConcurrency(t *testing.T) {
 
 	// Simulate concurrent updates
 	go func() {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			tickMsg := spinner.TickMsg{Time: time.Now(), ID: i}
 			_, _ = model.Update(tickMsg)
 			time.Sleep(10 * time.Millisecond)
@@ -603,7 +603,7 @@ func TestModelConcurrency(t *testing.T) {
 	}()
 
 	go func() {
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
 			_, _ = model.Update(keyMsg)
 			time.Sleep(20 * time.Millisecond)
@@ -613,7 +613,7 @@ func TestModelConcurrency(t *testing.T) {
 
 	// Wait for both goroutines
 	timeout := time.After(2 * time.Second)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case <-done:
 			// Expected
@@ -654,7 +654,7 @@ func BenchmarkRepoProcessedUpdate(b *testing.B) {
 
 	// Set up repos for processing
 	model.repos = make([]types.GitRepo, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		model.repos[i] = types.GitRepo{
 			Path: fmt.Sprintf("/test/repo%d", i),
 			Name: fmt.Sprintf("repo%d", i),

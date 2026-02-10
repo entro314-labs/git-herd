@@ -49,7 +49,9 @@ func NewModel(parentCtx context.Context, config *types.Config, rootPath string) 
 	baseCtx := parentCtx
 	var timeoutCancel context.CancelFunc
 	if config.Timeout > 0 {
-		baseCtx, timeoutCancel = context.WithTimeout(baseCtx, config.Timeout)
+		if _, hasDeadline := parentCtx.Deadline(); !hasDeadline {
+			baseCtx, timeoutCancel = context.WithTimeout(baseCtx, config.Timeout)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(baseCtx)
@@ -82,6 +84,28 @@ func NewModel(parentCtx context.Context, config *types.Config, rootPath string) 
 	}
 }
 
+// Cancel releases any resources tied to the model's context.
+func (m *Model) Cancel() {
+	if m.cancel != nil {
+		m.cancel()
+	}
+}
+
+// Results returns a copy of the processed repository results.
+func (m *Model) Results() []types.GitRepo {
+	if len(m.results) == 0 {
+		return nil
+	}
+	results := make([]types.GitRepo, len(m.results))
+	copy(results, m.results)
+	return results
+}
+
+// Error returns any terminal error captured by the model.
+func (m *Model) Error() error {
+	return m.err
+}
+
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
@@ -104,11 +128,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.WindowSizeMsg:
-		m.progress.Width = msg.Width - 4
-		// Limit max width to avoid excessively wide progress bars
-		if m.progress.Width > 80 {
-			m.progress.Width = 80
-		}
+		m.progress.Width = min(
+			// Limit max width to avoid excessively wide progress bars
+			msg.Width-4, 80)
 		return m, nil
 
 	case reposFoundMsg:

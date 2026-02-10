@@ -355,9 +355,9 @@ func TestModelRenderSummaryWithReport(t *testing.T) {
 
 	summary := model.renderSummary()
 
-	// Should mention the report file
-	if !strings.Contains(summary, "Detailed report saved to:") {
-		t.Error("Expected summary to mention saved report")
+	// Should mention the report file (without performing I/O in View)
+	if !strings.Contains(summary, "Report will be saved to:") {
+		t.Error("Expected summary to mention scheduled report")
 	}
 
 	if !strings.Contains(summary, tmpFile.Name()) {
@@ -400,7 +400,7 @@ func TestViewProgress(t *testing.T) {
 	model := NewModel(context.Background(), cfg, "/test/path")
 	model.phase = "processing"
 	model.repos = make([]types.GitRepo, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		model.repos[i] = types.GitRepo{
 			Path: fmt.Sprintf("/test/repo%d", i),
 			Name: fmt.Sprintf("repo%d", i),
@@ -537,7 +537,7 @@ func BenchmarkModelView(b *testing.B) {
 	model.phase = "processing"
 	model.repos = make([]types.GitRepo, 10)
 	model.results = make([]types.GitRepo, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		model.results[i] = types.GitRepo{
 			Name:     fmt.Sprintf("repo%d", i),
 			Branch:   "main",
@@ -562,7 +562,7 @@ func BenchmarkModelRenderSummary(b *testing.B) {
 	model.done = true
 	model.repos = make([]types.GitRepo, 100)
 	model.results = make([]types.GitRepo, 100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		model.results[i] = types.GitRepo{
 			Path:     fmt.Sprintf("/test/repo%d", i),
 			Name:     fmt.Sprintf("repo%d", i),

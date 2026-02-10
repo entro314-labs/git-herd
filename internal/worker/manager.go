@@ -49,14 +49,40 @@ func (m *Manager) Execute(ctx context.Context, rootPath string) error {
 	// Use TUI if not in plain mode and not verbose (TUI doesn't work well with verbose logging)
 	if !m.config.PlainMode && !m.config.Verbose {
 		model := tui.NewModel(ctx, m.config, rootPath)
+		defer model.Cancel()
 		p := tea.NewProgram(model)
 
-		if _, err := p.Run(); err != nil {
+		finalModel, err := p.Run()
+		if err != nil {
 			// Fallback to plain mode if TUI fails
 			m.logger.Error("TUI failed, falling back to plain mode", "error", err)
 			return m.executeInPlainMode(ctx, rootPath)
 		}
-		return nil
+
+		finalTUI, ok := finalModel.(*tui.Model)
+		if !ok {
+			return fmt.Errorf("unexpected TUI model type: %T", finalModel)
+		}
+
+		results := finalTUI.Results()
+		finalErr := finalTUI.Error()
+		if ctx.Err() != nil {
+			finalErr = errors.Join(finalErr, ctx.Err())
+		}
+
+		if len(results) == 0 {
+			return finalErr
+		}
+
+		successful, failed, skipped := summarizeResults(results)
+		if persistErr := m.persistArtifacts(ctx, results, successful, failed, skipped); persistErr != nil {
+			finalErr = errors.Join(finalErr, persistErr)
+		}
+		if failed > 0 {
+			finalErr = errors.Join(finalErr, fmt.Errorf("%d repositories failed", failed))
+		}
+
+		return finalErr
 	}
 
 	return m.executeInPlainMode(ctx, rootPath)
@@ -108,7 +134,6 @@ func (m *Manager) processReposConcurrently(ctx context.Context, repos []types.Gi
 
 	// Start workers
 	for _, repo := range repos {
-		repo := repo // capture loop variable
 		g.Go(func() error {
 			processedRepo := m.processor.ProcessRepo(ctx, repo)
 			select {
@@ -202,10 +227,40 @@ func (m *Manager) displayResults(ctx context.Context, resultChan <-chan types.Gi
 	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 	fmt.Printf("📈 Summary: %d successful, %d failed, %d skipped, %d total\n", successful, failed, skipped, total)
 
-	// Save report to file if requested
+	// Save report/export scan results if requested
+	finalErr := m.persistArtifacts(ctx, allResults, successful, failed, skipped)
+
+	if !m.config.FullSummary && len(allResults) > 10 {
+		fmt.Printf("💡 Use --full-summary flag to see all %d repositories\n", len(allResults))
+	}
+
+	if failed > 0 {
+		finalErr = errors.Join(finalErr, fmt.Errorf("%d repositories failed", failed))
+	}
+
+	return finalErr
+}
+
+func summarizeResults(results []types.GitRepo) (successful, failed, skipped int) {
+	for _, result := range results {
+		if result.Error != nil {
+			if errors.Is(result.Error, types.ErrRepoSkipped) {
+				skipped++
+			} else {
+				failed++
+			}
+		} else {
+			successful++
+		}
+	}
+
+	return successful, failed, skipped
+}
+
+func (m *Manager) persistArtifacts(ctx context.Context, results []types.GitRepo, successful, failed, skipped int) error {
 	var finalErr error
 	if m.config.SaveReport != "" {
-		if err := tui.SaveReport(m.config, allResults, successful, failed, skipped); err != nil {
+		if err := tui.SaveReport(m.config, results, successful, failed, skipped); err != nil {
 			m.logger.ErrorContext(ctx, "Failed to save report", "error", err)
 			fmt.Fprintf(os.Stderr, "Error saving report: %v\n", err)
 			finalErr = errors.Join(finalErr, err)
@@ -214,23 +269,14 @@ func (m *Manager) displayResults(ctx context.Context, resultChan <-chan types.Gi
 		}
 	}
 
-	// Export scan results to markdown if requested
 	if m.config.ExportScan != "" {
-		if err := m.exportScanToMarkdown(allResults, m.config.ExportScan); err != nil {
+		if err := m.exportScanToMarkdown(results, m.config.ExportScan); err != nil {
 			m.logger.ErrorContext(ctx, "Failed to export scan", "error", err)
 			fmt.Fprintf(os.Stderr, "Error exporting scan: %v\n", err)
 			finalErr = errors.Join(finalErr, err)
 		} else {
 			fmt.Printf("📋 Scan report exported to: %s\n", m.config.ExportScan)
 		}
-	}
-
-	if !m.config.FullSummary && len(allResults) > 10 {
-		fmt.Printf("💡 Use --full-summary flag to see all %d repositories\n", len(allResults))
-	}
-
-	if failed > 0 {
-		finalErr = errors.Join(finalErr, fmt.Errorf("%d repositories failed", failed))
 	}
 
 	return finalErr
