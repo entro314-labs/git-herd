@@ -2,7 +2,6 @@ package git
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -131,17 +130,12 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 		return repo
 	}
 
-	gitRepo, err := gogit.PlainOpen(repo.Path)
-	if err != nil {
-		repo.Error = fmt.Errorf("failed to open repository: %w", err)
-		return repo
-	}
-
+	var err error
 	switch p.config.Operation {
 	case types.OperationFetch:
-		err = p.fetchRepo(ctx, gitRepo)
+		err = p.fetchRepo(ctx, repo.Path)
 	case types.OperationPull:
-		err = p.pullRepo(ctx, gitRepo)
+		err = p.pullRepo(ctx, repo.Path)
 	case types.OperationScan:
 		// Scan operation - analysis already done in AnalyzeRepo
 		return repo
@@ -155,33 +149,26 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 }
 
 // fetchRepo performs git fetch on a repository
-func (p *Processor) fetchRepo(ctx context.Context, repo *gogit.Repository) error {
-	err := repo.FetchContext(ctx, &gogit.FetchOptions{
-		RemoteName: "origin",
-		Progress:   nil, // We could add progress reporting here
-	})
+func (p *Processor) fetchRepo(ctx context.Context, repoPath string) error {
+	cmd := exec.CommandContext(ctx, "git", "fetch", "origin")
+	cmd.Dir = repoPath
+	cmd.Env = os.Environ()
 
-	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
-		return fmt.Errorf("fetch failed: %w", err)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("fetch failed: %w (output: %s)", err, string(output))
 	}
 
 	return nil
 }
 
 // pullRepo performs git pull on a repository
-func (p *Processor) pullRepo(ctx context.Context, repo *gogit.Repository) error {
-	worktree, err := repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("failed to get worktree: %w", err)
-	}
+func (p *Processor) pullRepo(ctx context.Context, repoPath string) error {
+	cmd := exec.CommandContext(ctx, "git", "pull", "origin")
+	cmd.Dir = repoPath
+	cmd.Env = os.Environ()
 
-	err = worktree.PullContext(ctx, &gogit.PullOptions{
-		RemoteName: "origin",
-		Progress:   nil,
-	})
-
-	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
-		return fmt.Errorf("pull failed: %w", err)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("pull failed: %w (output: %s)", err, string(output))
 	}
 
 	return nil
@@ -202,7 +189,8 @@ func (p *Processor) discardFiles(ctx context.Context, gitRepo *gogit.Repository,
 	// Track which files were discarded
 	var discardedFiles []string
 
-	// Iterate through modified files and discard those matching patterns
+	// First pass: check if there are ANY files that do NOT match the discard patterns
+	// If there are, we shouldn't discard anything because the user has legitimate changes
 	for file, fileStatus := range status {
 		if fileStatus.Worktree == gogit.Unmodified && fileStatus.Staging == gogit.Unmodified {
 			continue
@@ -214,27 +202,29 @@ func (p *Processor) discardFiles(ctx context.Context, gitRepo *gogit.Repository,
 		}
 
 		// Check if file matches any discard pattern
-		shouldDiscard := false
+		matches := false
 		for _, pattern := range p.config.DiscardFiles {
 			// Support both exact matches and glob patterns
 			matched, err := filepath.Match(pattern, filepath.Base(file))
 			if err != nil {
 				return fmt.Errorf("invalid discard pattern %q: %w", pattern, err)
 			}
-			if matched {
-				shouldDiscard = true
-				break
-			}
-			// Also check exact match
-			if file == pattern || filepath.Base(file) == pattern {
-				shouldDiscard = true
+			if matched || file == pattern || filepath.Base(file) == pattern {
+				matches = true
 				break
 			}
 		}
 
-		if shouldDiscard {
-			discardedFiles = append(discardedFiles, file)
+		if !matches {
+			// Found a modified file that we shouldn't discard
+			// Bail out entirely - we only discard if ALL modified files match the patterns
+			if p.config.Verbose {
+				fmt.Printf("  Keeping changes in %s because %s is modified and doesn't match discard patterns\n", repo.Name, file)
+			}
+			return nil
 		}
+
+		discardedFiles = append(discardedFiles, file)
 	}
 
 	// If we have files to discard, use git checkout to reset them

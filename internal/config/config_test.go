@@ -32,7 +32,7 @@ func TestDefaultConfig(t *testing.T) {
 		PlainMode:    false,
 		FullSummary:  false,
 		SaveReport:   "",
-		DiscardFiles: []string{},
+		DiscardFiles: []string{".DS_Store", "package.json", "pnpm-lock.yaml"},
 		ExportScan:   "",
 	}
 
