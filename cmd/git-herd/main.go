@@ -80,7 +80,7 @@ found in the specified directory and its subdirectories.`,
 			if err != nil {
 				return fmt.Errorf("open root %s: %w", rootPath, err)
 			}
-			defer root.Close()
+			defer func() { _ = root.Close() }()
 
 			// Create and execute manager
 			manager := worker.New(cfg)

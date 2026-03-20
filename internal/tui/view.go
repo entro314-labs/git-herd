@@ -61,15 +61,15 @@ func (m *Model) View() string {
 	// Current phase
 	switch m.phase {
 	case "initializing", "scanning":
-		content.WriteString(fmt.Sprintf("%s Scanning for Git repositories in %s\n",
+		fmt.Fprintf(&content, "%s Scanning for Git repositories in %s\n",
 			m.spinner.View(),
-			infoStyle.Render(m.rootPath)))
+			infoStyle.Render(m.rootPath))
 
 	case "processing":
 		if len(m.repos) > 0 {
 			percent := float64(m.processed) / float64(len(m.repos))
-			content.WriteString(fmt.Sprintf("Processing repositories %s\n",
-				statusStyle.Render(fmt.Sprintf("(%d/%d)", m.processed, len(m.repos)))))
+			fmt.Fprintf(&content, "Processing repositories %s\n",
+				statusStyle.Render(fmt.Sprintf("(%d/%d)", m.processed, len(m.repos))))
 			content.WriteString(m.progress.ViewAs(percent))
 			content.WriteString("\n\n")
 
@@ -82,10 +82,10 @@ func (m *Model) View() string {
 			for i := start; i < len(m.results); i++ {
 				result := m.results[i]
 				if result.Error != nil {
-					content.WriteString(fmt.Sprintf("%s %s: %s\n",
+					fmt.Fprintf(&content, "%s %s: %s\n",
 						errorStyle.Render("✗"),
 						result.Name,
-						result.Error.Error()))
+						result.Error.Error())
 				} else {
 					duration := result.Duration.Truncate(time.Millisecond)
 					content.WriteString(fmt.Sprintf("%s %s [%s@%s] - %v\n",

@@ -36,7 +36,7 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string, onProgress fun
 	if err != nil {
 		return nil, fmt.Errorf("open root %s: %w", rootPath, err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	rootFS := root.FS()
 
