@@ -88,12 +88,12 @@ func (m *Model) View() string {
 						result.Error.Error())
 				} else {
 					duration := result.Duration.Truncate(time.Millisecond)
-					content.WriteString(fmt.Sprintf("%s %s [%s@%s] - %v\n",
+					fmt.Fprintf(&content, "%s %s [%s@%s] - %v\n",
 						successStyle.Render("✓"),
 						result.Name,
 						result.Branch,
 						result.Remote,
-						duration))
+						duration)
 				}
 			}
 		}
@@ -139,17 +139,17 @@ func (m *Model) renderSummary() string {
 		if result.Error != nil {
 			failed++
 			if errors.Is(result.Error, types.ErrRepoSkipped) {
-				content.WriteString(fmt.Sprintf("%s %s (%s): %s\n",
+				fmt.Fprintf(&content, "%s %s (%s): %s\n",
 					infoStyle.Render("⊝"),
 					result.Name,
 					result.Path,
-					result.Error.Error()))
+					result.Error.Error())
 			} else {
-				content.WriteString(fmt.Sprintf("%s %s (%s): %s\n",
+				fmt.Fprintf(&content, "%s %s (%s): %s\n",
 					errorStyle.Render("✗"),
 					result.Name,
 					result.Path,
-					result.Error.Error()))
+					result.Error.Error())
 			}
 		} else {
 			successful++
@@ -158,13 +158,13 @@ func (m *Model) renderSummary() string {
 				status = "👁"
 			}
 			duration := result.Duration.Truncate(time.Millisecond)
-			content.WriteString(fmt.Sprintf("%s %s (%s) [%s@%s] - %v\n",
+			fmt.Fprintf(&content, "%s %s (%s) [%s@%s] - %v\n",
 				successStyle.Render(status),
 				result.Name,
 				result.Path,
 				result.Branch,
 				result.Remote,
-				duration))
+				duration)
 		}
 	}
 
@@ -193,10 +193,10 @@ func (m *Model) renderSummary() string {
 
 	// Report/export notes (saved after TUI exits)
 	if m.config.SaveReport != "" {
-		content.WriteString(fmt.Sprintf("\n📄 Report will be saved to: %s", m.config.SaveReport))
+		fmt.Fprintf(&content, "\n📄 Report will be saved to: %s", m.config.SaveReport)
 	}
 	if m.config.ExportScan != "" {
-		content.WriteString(fmt.Sprintf("\n📋 Scan report will be exported to: %s", m.config.ExportScan))
+		fmt.Fprintf(&content, "\n📋 Scan report will be exported to: %s", m.config.ExportScan)
 	}
 
 	return content.String()
