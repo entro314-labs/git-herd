@@ -122,7 +122,7 @@ jobs:
 
       - name: Test installation (Go)
         run: |
-          go install github.com/${{ github.repository }}@${{ github.ref_name }}
+          go install github.com/${{ github.repository }}/cmd/git-herd@${{ github.ref_name }}
           git-herd --version
 
       - name: Test Docker image
