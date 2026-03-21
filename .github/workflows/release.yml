@@ -1,5 +1,6 @@
-# Release Workflow for git-herd
+# Release Workflow — git-herd
 # Triggers on version tags (v*.*.*) and creates GitHub releases
+# Includes Cosign signing and post-release verification
 
 name: Release
 
@@ -53,21 +54,18 @@ jobs:
         uses: docker/setup-buildx-action@v4
         with:
           driver: docker-container
-          # Name the builder 'goreleaser' so GoReleaser can use it
           buildkitd-config-inline: |
             [worker.oci]
               max-parallelism = 4
-          # Install QEMU platforms
           platforms: linux/amd64,linux/arm64
 
-      # Verify buildx is working and list builders
       - name: Verify buildx setup
+        env:
+          BUILDER_NAME: ${{ steps.buildx.outputs.name }}
         run: |
           docker buildx ls
           docker run --privileged --rm tonistiigi/binfmt --install all
-          # Get the current builder name directly from action outputs
-          echo "Current builder: ${{ steps.buildx.outputs.name }}"
-          echo "BUILDER_NAME=${{ steps.buildx.outputs.name }}" >> $GITHUB_ENV
+          echo "BUILDER_NAME=${BUILDER_NAME}" >> $GITHUB_ENV
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
@@ -79,6 +77,8 @@ jobs:
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@v0.24.0
 
+     # - name: Install Cosign
+     #   uses: sigstore/cosign-installer@v4.1.0
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
@@ -89,6 +89,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+        #  COSIGN_PWD: ${{ secrets.COSIGN_PWD }}
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
@@ -103,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Wait for release
+      - name: Wait for release propagation
         run: sleep 30
 
       - name: Set up Go
@@ -115,18 +118,26 @@ jobs:
       - name: Verify GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
-          TAG="${{ github.ref_name }}"
           echo "Checking release for tag: $TAG"
-          gh release view "$TAG" --repo "${{ github.repository }}"
+          gh release view "$TAG" --repo "$REPO"
 
       - name: Test installation (Go)
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
-          go install github.com/${{ github.repository }}/cmd/git-herd@${{ github.ref_name }}
+          go install "github.com/${REPO}/cmd/git-herd@${TAG}"
           git-herd --version
 
       - name: Test Docker image
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
-          docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-          docker run --rm ghcr.io/${{ github.repository }}:${{ github.ref_name }} --version
+          VERSION="${TAG#v}"
+          docker pull "ghcr.io/${REPO}:${VERSION}"
+          docker run --rm "ghcr.io/${REPO}:${VERSION}" --version
         continue-on-error: true

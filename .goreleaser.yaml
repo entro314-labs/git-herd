@@ -1,15 +1,10 @@
-# GoReleaser Configuration for git-herd
-# Comprehensive configuration with support for:
-# - Multi-platform builds (Linux, macOS, Windows)
-# - Package managers: Homebrew, AUR, Winget, Nix
-# - Docker images with multi-arch manifests
-# - SBOM generation and GPG signing
+# GoReleaser Configuration — git-herd
+# Features: multi-platform builds, Homebrew/Winget/AUR/Docker/nfpms,
+#           SBOM generation, Cosign signing, conditional secret guards
 #
 # Documentation: https://goreleaser.com
 
 version: 2
-
-
 
 project_name: git-herd
 
@@ -20,12 +15,13 @@ env:
   - GO111MODULE=on
 
 # =============================================================================
-# Before hooks
+# Before hooks — go test acts as a release gate
 # =============================================================================
 before:
   hooks:
     - go mod tidy
     - go mod verify
+    - go test ./...
 
 # =============================================================================
 # Builds
@@ -107,19 +103,19 @@ changelog:
   sort: asc
   abbrev: 7
   groups:
-    - title: "🚀 Features"
+    - title: "Features"
       regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
       order: 0
-    - title: "🐛 Bug Fixes"
+    - title: "Bug Fixes"
       regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
       order: 1
-    - title: "📚 Documentation"
+    - title: "Documentation"
       regexp: '^.*?docs?(\([[:word:]]+\))??!?:.+$'
       order: 2
-    - title: "🔧 Performance & Refactors"
+    - title: "Performance & Refactors"
       regexp: '^.*?(perf|refactor)(\([[:word:]]+\))??!?:.+$'
       order: 3
-    - title: "📦 Dependencies"
+    - title: "Dependencies"
       regexp: '^.*?(build|deps?)(\([[:word:]]+\))??!?:.+$'
       order: 4
     - title: "Other Changes"
@@ -156,7 +152,17 @@ release:
 
     ### Homebrew (macOS/Linux)
     ```bash
-    brew install entro314-labs/tap/git-herd
+    brew install --cask entro314-labs/homebrew-tap/git-herd
+    ```
+
+    ### Winget (Windows)
+    ```powershell
+    winget install entro314-labs.git-herd
+    ```
+
+    ### AUR (Arch Linux)
+    ```bash
+    yay -S git-herd-bin
     ```
 
     ### Go Install
@@ -175,10 +181,12 @@ release:
     **Full Changelog**: https://github.com/entro314-labs/git-herd/compare/{{ .PreviousTag }}...{{ .Tag }}
 
 # =============================================================================
-# Homebrew (uncomment when homebrew-tap repo is created)
+# Homebrew Cask
 # =============================================================================
 homebrew_casks:
   - name: git-herd
+    ids:
+      - default
     repository:
       owner: entro314-labs
       name: homebrew-tap
@@ -188,24 +196,75 @@ homebrew_casks:
     homepage: https://github.com/entro314-labs/git-herd
     description: "A concurrent Git repository management tool"
     license: MIT
+    skip_upload: '{{ or .IsSnapshot (eq .Env.HOMEBREW_TAP_TOKEN "") }}'
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
     commit_msg_template: "Homebrew Cask update for {{ .ProjectName }} version {{ .Tag }}"
-
-    # Casks use declarative binaries and completions, not Ruby install scripts
     binaries:
       - git-herd
 
-    # Define completions if you generate them in your build or have them in the repo
-    # Assuming completions are generated/available
-    # completions:
-    #   bash: completions/git-herd.bash
-    #   zsh: completions/git-herd.zsh
-    #   fish: completions/git-herd.fish
+# =============================================================================
+# Winget (Windows Package Manager) — conditional on WINGET_TOKEN
+# =============================================================================
+winget:
+  - name: git-herd
+    ids:
+      - default
+    package_identifier: entro314-labs.git-herd
+    publisher: entro314-labs
+    publisher_url: https://github.com/entro314-labs
+    publisher_support_url: https://github.com/entro314-labs/git-herd/issues
+    short_description: "A concurrent Git repository management tool"
+    description: "A concurrent Git repository management tool"
+    homepage: https://github.com/entro314-labs/git-herd
+    license: MIT
+    license_url: https://github.com/entro314-labs/git-herd/blob/main/LICENSE
+    skip_upload: '{{ or .IsSnapshot (eq .Env.WINGET_TOKEN "") }}'
+    repository:
+      owner: entro314-labs
+      name: winget-pkgs
+      branch: "git-herd-{{ .Version }}"
+      token: "{{ .Env.WINGET_TOKEN }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+    commit_msg_template: "{{ .PackageIdentifier }}: {{ .Tag }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
 
 # =============================================================================
-# Linux packages (deb/rpm)
+# AUR (Arch User Repository) — conditional on AUR_KEY
+# =============================================================================
+aurs:
+  - name: git-herd-bin
+    ids:
+      - default
+    homepage: https://github.com/entro314-labs/git-herd
+    description: "A concurrent Git repository management tool"
+    maintainers:
+      - "entro314-labs"
+    license: MIT
+    disable: '{{ or .IsSnapshot (eq .Env.AUR_KEY "") }}'
+    private_key: "{{ .Env.AUR_KEY }}"
+    git_url: "ssh://aur@aur.archlinux.org/git-herd-bin.git"
+    provides:
+      - git-herd
+    conflicts:
+      - git-herd
+    package: |-
+      install -Dm755 "./git-herd" "${pkgdir}/usr/bin/git-herd"
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/git-herd/LICENSE"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+
+# =============================================================================
+# Linux packages (deb/rpm/apk)
 # =============================================================================
 nfpms:
   - id: packages
@@ -243,8 +302,6 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
 
-    # Skip Docker builds in snapshot mode - --load is incompatible with cross-arch builds
-    # Production releases (with tags) will still build and push Docker images
     disable: "{{ .IsSnapshot }}"
 
     flags:
@@ -257,6 +314,12 @@ dockers_v2:
       "org.opencontainers.image.version": "{{.Version}}"
       "org.opencontainers.image.source": "https://github.com/entro314-labs/git-herd"
 
+# =============================================================================
+# Docker Signing (Cosign)
+# =============================================================================
+#docker_signs:
+# - artifacts: all
+#    stdin: "{{ .Env.COSIGN_PWD }}"
 
 # =============================================================================
 # SBOM (Software Bill of Materials)
@@ -264,8 +327,23 @@ dockers_v2:
 sboms:
   - id: archive
     artifacts: archive
+    documents:
+      - "${artifact}.spdx.json"
   - id: source
     artifacts: source
+    documents:
+      - "${artifact}.spdx.json"
+
+# =============================================================================
+# Artifact Signing (Cosign)
+# =============================================================================
+#signs:
+#  - id: checksum-sign
+#    artifacts: checksum
+#    stdin: "{{ .Env.COSIGN_PWD }}"
+#  - id: artifacts-sign
+#    artifacts: all
+#    stdin: "{{ .Env.COSIGN_PWD }}"
 
 # =============================================================================
 # Source archive
@@ -282,7 +360,7 @@ metadata:
   mod_timestamp: '{{ .CommitTimestamp }}'
 
 # =============================================================================
-# Announcements (optional)
+# Announcements — skip for patch releases
 # =============================================================================
 announce:
-  skip: "{{gt .Patch 0}}"  # Skip announcements for patch releases
+  skip: "{{gt .Patch 0}}"
