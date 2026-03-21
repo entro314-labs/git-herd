@@ -1,185 +1,283 @@
 # git-herd Makefile
+# Go project Makefile with cross-platform builds, PGO support, and GoReleaser
 
+# =============================================================================
 # Variables
-BINARY_NAME=git-herd
-VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-BUILD_TIME=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-GO_VERSION=$(shell go version | cut -d' ' -f3)
-COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
-LDFLAGS=-ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_TIME} -X main.builtBy=make"
+# =============================================================================
+BINARY_NAME := git-herd
+MAIN_PACKAGE := ./cmd/git-herd
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GO_VERSION := $(shell go version | cut -d' ' -f3)
 
+# Build configuration
+CGO_ENABLED ?= 0
+GOARM64 ?= v8.0,lse,crypto
+PGO_PROFILE := default.pgo
+
+# Linker flags
+LDFLAGS := -s -w \
+	-X main.version=$(VERSION) \
+	-X main.commit=$(GIT_COMMIT) \
+	-X main.date=$(BUILD_TIME) \
+	-X main.builtBy=make
+
+# Output directories
+DIST_DIR := dist
+BUILD_DIR := build
+
+# =============================================================================
 # Default target
-.PHONY: all
-all: clean build
+# =============================================================================
+.DEFAULT_GOAL := help
 
-# Build the binary
+.PHONY: all
+all: clean lint test build
+
+# =============================================================================
+# Build targets
+# =============================================================================
 .PHONY: build
 build:
-	@echo "Building ${BINARY_NAME}..."
-	go build ${LDFLAGS} -o ${BINARY_NAME} ./cmd/git-herd
+	@echo "Building $(BINARY_NAME)..."
+	CGO_ENABLED=$(CGO_ENABLED) go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) $(MAIN_PACKAGE)
+	@echo "Build complete"
 
-# Build with race detection for development
 .PHONY: build-dev
 build-dev:
-	@echo "Building ${BINARY_NAME} with race detection..."
-	go build -race ${LDFLAGS} -o ${BINARY_NAME}-dev ./cmd/git-herd
+	@echo "Building $(BINARY_NAME) with race detection..."
+	CGO_ENABLED=1 go build -race -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-dev $(MAIN_PACKAGE)
 
-# Install dependencies
+.PHONY: build-pgo
+build-pgo:
+	@if [ -f $(PGO_PROFILE) ]; then \
+		echo "Building with Profile-Guided Optimization..."; \
+		CGO_ENABLED=$(CGO_ENABLED) go build -trimpath -pgo=$(PGO_PROFILE) \
+			-ldflags="$(LDFLAGS)" \
+			-o $(BINARY_NAME) $(MAIN_PACKAGE); \
+		echo "PGO build complete"; \
+	else \
+		echo "No $(PGO_PROFILE) found. Building without PGO..."; \
+		$(MAKE) build; \
+	fi
+
+# macOS universal binary (Intel + ARM64)
+.PHONY: build-universal
+build-universal:
+	@echo "Building universal binary (macOS only)..."
+	@mkdir -p $(BUILD_DIR)
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=$(CGO_ENABLED) \
+		go build -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-amd64 $(MAIN_PACKAGE)
+	GOOS=darwin GOARCH=arm64 GOARM64=$(GOARM64) CGO_ENABLED=$(CGO_ENABLED) \
+		go build -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-arm64 $(MAIN_PACKAGE)
+	lipo -create -output $(BINARY_NAME) $(BUILD_DIR)/$(BINARY_NAME)-amd64 $(BUILD_DIR)/$(BINARY_NAME)-arm64
+	@echo "Universal binary: $$(lipo -info $(BINARY_NAME))"
+
+# =============================================================================
+# Cross-platform builds
+# =============================================================================
+.PHONY: build-all
+build-all: clean
+	@echo "Building for all platforms..."
+	@mkdir -p $(DIST_DIR)
+	@for pair in "darwin/amd64" "darwin/arm64" "linux/amd64" "linux/arm64" "windows/amd64"; do \
+		os=$${pair%%/*}; arch=$${pair##*/}; \
+		ext=""; [ "$$os" = "windows" ] && ext=".exe"; \
+		echo "  -> $$os/$$arch"; \
+		GOOS=$$os GOARCH=$$arch CGO_ENABLED=$(CGO_ENABLED) \
+			go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)-$$os-$$arch$$ext $(MAIN_PACKAGE); \
+	done
+	@echo "Cross-platform builds complete:"
+	@ls -lh $(DIST_DIR)/
+
+# =============================================================================
+# Dependencies
+# =============================================================================
 .PHONY: deps
 deps:
 	@echo "Installing dependencies..."
 	go mod download
 	go mod tidy
+	go mod verify
 
-# Run tests
+.PHONY: deps-update
+deps-update:
+	@echo "Updating dependencies..."
+	go get -u ./...
+	go mod tidy
+
+# =============================================================================
+# Testing
+# =============================================================================
 .PHONY: test
 test:
 	@echo "Running tests..."
 	go test -v -race -coverprofile=coverage.out ./...
 
-# Run tests with coverage report
+.PHONY: test-short
+test-short:
+	@echo "Running short tests..."
+	go test -short -race ./...
+
 .PHONY: test-coverage
 test-coverage: test
 	@echo "Generating coverage report..."
 	go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated: coverage.html"
+	@echo "Coverage report: coverage.html"
 
-# Run linting
+.PHONY: benchmark
+benchmark:
+	@echo "Running benchmarks..."
+	go test -bench=. -benchmem ./...
+
+# =============================================================================
+# Linting and formatting
+# =============================================================================
 .PHONY: lint
 lint:
 	@echo "Running linters..."
 	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run; \
+		golangci-lint run --timeout=5m; \
 	else \
-		echo "golangci-lint not installed. Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
+		echo "golangci-lint not found, running go vet..."; \
 		go vet ./...; \
 	fi
 
-# Format code
 .PHONY: fmt
 fmt:
 	@echo "Formatting code..."
 	go fmt ./...
 	@if command -v goimports >/dev/null 2>&1; then \
 		goimports -w .; \
-	else \
-		echo "goimports not installed. Install with: go install golang.org/x/tools/cmd/goimports@latest"; \
 	fi
 
-# Clean build artifacts
+.PHONY: check
+check: fmt lint test
+
+# =============================================================================
+# Installation
+# =============================================================================
+.PHONY: install
+install: build
+	@echo "Installing $(BINARY_NAME) to /usr/local/bin..."
+	sudo install -m 755 $(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
+	@echo "Installed $(BINARY_NAME)"
+
+.PHONY: uninstall
+uninstall:
+	@echo "Removing $(BINARY_NAME) from /usr/local/bin..."
+	sudo rm -f /usr/local/bin/$(BINARY_NAME)
+	@echo "Uninstalled $(BINARY_NAME)"
+
+# =============================================================================
+# Development
+# =============================================================================
+.PHONY: dev
+dev: deps fmt lint test build
+	@echo "Development workflow complete"
+
+.PHONY: run
+run: build
+	./$(BINARY_NAME) --help
+
+# =============================================================================
+# Docker
+# =============================================================================
+.PHONY: docker-build
+docker-build:
+	docker build -t $(BINARY_NAME):$(VERSION) -t $(BINARY_NAME):latest .
+
+.PHONY: docker-run
+docker-run:
+	docker run --rm $(BINARY_NAME):latest --help
+
+# =============================================================================
+# Release (GoReleaser)
+# =============================================================================
+.PHONY: release-check
+release-check:
+	goreleaser check
+
+.PHONY: release-snapshot
+release-snapshot:
+	goreleaser release --snapshot --clean
+
+.PHONY: release
+release:
+	goreleaser release --clean
+
+# =============================================================================
+# Cleanup
+# =============================================================================
 .PHONY: clean
 clean:
 	@echo "Cleaning build artifacts..."
 	go clean
-	rm -f ${BINARY_NAME}
-	rm -f ${BINARY_NAME}-*
+	rm -f $(BINARY_NAME) $(BINARY_NAME)-*
+	rm -rf $(DIST_DIR) $(BUILD_DIR)
 	rm -f coverage.out coverage.html
+	rm -f *.prof $(PGO_PROFILE)
 
-# Install the binary to /usr/local/bin
-.PHONY: install
-install: build
-	@echo "Installing ${BINARY_NAME} to /usr/local/bin..."
-	sudo cp ${BINARY_NAME} /usr/local/bin/
-	@echo "${BINARY_NAME} installed successfully!"
-
-# Uninstall the binary from /usr/local/bin
-.PHONY: uninstall
-uninstall:
-	@echo "Removing ${BINARY_NAME} from /usr/local/bin..."
-	sudo rm -f /usr/local/bin/${BINARY_NAME}
-	@echo "${BINARY_NAME} uninstalled successfully!"
-
-# Cross-platform builds
-.PHONY: build-all
-build-all: clean
-	@echo "Building for all platforms..."
-
-	@echo "Building for macOS (Intel)..."
-	GOOS=darwin GOARCH=amd64 go build ${LDFLAGS} -o ${BINARY_NAME}-darwin-amd64 ./cmd/git-herd
-
-	@echo "Building for macOS (Apple Silicon)..."
-	GOOS=darwin GOARCH=arm64 go build ${LDFLAGS} -o ${BINARY_NAME}-darwin-arm64 ./cmd/git-herd
-
-	@echo "Building for Linux (x64)..."
-	GOOS=linux GOARCH=amd64 go build ${LDFLAGS} -o ${BINARY_NAME}-linux-amd64 ./cmd/git-herd
-
-	@echo "Building for Linux (ARM64)..."
-	GOOS=linux GOARCH=arm64 go build ${LDFLAGS} -o ${BINARY_NAME}-linux-arm64 ./cmd/git-herd
-
-	@echo "Building for Windows (x64)..."
-	GOOS=windows GOARCH=amd64 go build ${LDFLAGS} -o ${BINARY_NAME}-windows-amd64.exe ./cmd/git-herd
-
-	@echo "Cross-platform builds completed!"
-
-# Create release packages
-.PHONY: package
-package: build-all
-	@echo "Creating release packages..."
-	mkdir -p dist
-
-	# macOS packages
-	tar -czf dist/${BINARY_NAME}-${VERSION}-darwin-amd64.tar.gz ${BINARY_NAME}-darwin-amd64 README.md
-	tar -czf dist/${BINARY_NAME}-${VERSION}-darwin-arm64.tar.gz ${BINARY_NAME}-darwin-arm64 README.md
-
-	# Linux packages
-	tar -czf dist/${BINARY_NAME}-${VERSION}-linux-amd64.tar.gz ${BINARY_NAME}-linux-amd64 README.md
-	tar -czf dist/${BINARY_NAME}-${VERSION}-linux-arm64.tar.gz ${BINARY_NAME}-linux-arm64 README.md
-
-	# Windows package
-	zip -j dist/${BINARY_NAME}-${VERSION}-windows-amd64.zip ${BINARY_NAME}-windows-amd64.exe README.md
-
-	@echo "Release packages created in dist/"
-
-# Development workflow
-.PHONY: dev
-dev: deps fmt lint test build
-
-# Run the application with example arguments
-.PHONY: run
-run: build
-	./${BINARY_NAME} -v -n
-
-# Run with custom path
-.PHONY: run-path
-run-path: build
-	@read -p "Enter path to scan: " path; \
-	./${BINARY_NAME} -v -n "$$path"
-
-# Show help
-.PHONY: help
-help:
-	@echo "git-herd Makefile"
-	@echo ""
-	@echo "Available targets:"
-	@echo "  build        Build the binary"
-	@echo "  build-dev    Build with race detection"
-	@echo "  build-all    Cross-platform builds"
-	@echo "  clean        Clean build artifacts"
-	@echo "  deps         Install dependencies"
-	@echo "  dev          Full development workflow (deps, fmt, lint, test, build)"
-	@echo "  fmt          Format code"
-	@echo "  help         Show this help"
-	@echo "  install      Install binary to /usr/local/bin"
-	@echo "  lint         Run linters"
-	@echo "  package      Create release packages"
-	@echo "  run          Run the application with default args"
-	@echo "  run-path     Run with custom path input"
-	@echo "  test         Run tests"
-	@echo "  test-coverage Run tests with coverage"
-	@echo "  uninstall    Remove binary from /usr/local/bin"
-	@echo ""
-	@echo "Version: ${VERSION}"
-	@echo "Go Version: ${GO_VERSION}"
-
-# Development tools installation
+# =============================================================================
+# Tools installation
+# =============================================================================
 .PHONY: install-tools
 install-tools:
 	@echo "Installing development tools..."
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install golang.org/x/tools/cmd/goimports@latest
-	@echo "Development tools installed!"
+	go install github.com/goreleaser/goreleaser/v2@latest
+	@echo "Development tools installed"
 
-# Quick development setup
 .PHONY: setup
 setup: install-tools deps
-	@echo "Development environment setup complete!"
+	@echo "Development environment ready"
+
+# =============================================================================
+# Information
+# =============================================================================
+.PHONY: info
+info:
+	@echo "Build Information:"
+	@echo "  Binary:     $(BINARY_NAME)"
+	@echo "  Version:    $(VERSION)"
+	@echo "  Commit:     $(GIT_COMMIT)"
+	@echo "  Go:         $(GO_VERSION)"
+	@echo "  CGO:        $(CGO_ENABLED)"
+
+.PHONY: help
+help:
+	@echo "$(BINARY_NAME) Makefile"
+	@echo ""
+	@echo "Build targets:"
+	@echo "  build            Build binary"
+	@echo "  build-dev        Build with race detection"
+	@echo "  build-pgo        Build with Profile-Guided Optimization"
+	@echo "  build-universal  Build macOS universal binary"
+	@echo "  build-all        Cross-platform builds"
+	@echo ""
+	@echo "Development:"
+	@echo "  deps             Download dependencies"
+	@echo "  deps-update      Update dependencies"
+	@echo "  test             Run tests with coverage"
+	@echo "  lint             Run linters"
+	@echo "  fmt              Format code"
+	@echo "  check            Run fmt, lint, and test"
+	@echo "  dev              Full dev workflow"
+	@echo ""
+	@echo "Installation:"
+	@echo "  install          Install to /usr/local/bin"
+	@echo "  uninstall        Remove from /usr/local/bin"
+	@echo ""
+	@echo "Release:"
+	@echo "  release-check    Validate GoReleaser config"
+	@echo "  release-snapshot Build snapshot release"
+	@echo "  release          Create release with GoReleaser"
+	@echo ""
+	@echo "Other:"
+	@echo "  docker-build     Build Docker image"
+	@echo "  clean            Clean artifacts"
+	@echo "  setup            Setup dev environment"
+	@echo "  info             Show build info"
+	@echo "  help             Show this help"
