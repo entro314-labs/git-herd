@@ -62,13 +62,6 @@ found in the specified directory and its subdirectories.`,
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			// Add timeout if specified
-			if cfg.Timeout > 0 {
-				var timeoutCancel context.CancelFunc
-				ctx, timeoutCancel = context.WithTimeout(ctx, cfg.Timeout)
-				defer timeoutCancel()
-			}
-
 			// Determine root path
 			rootPath := "."
 			if len(args) > 0 {

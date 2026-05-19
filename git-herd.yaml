@@ -45,7 +45,8 @@ discard-files: []
 # Export repository scan to markdown file (requires operation: scan)
 export-scan: ""
 
-# Overall timeout for the entire operation
+# Per-repository operation timeout
+# Each repo's fetch/pull/discard runs under this deadline independently.
 # Format: duration string (e.g., "5m", "30s", "1h30m")
 timeout: 10m
 

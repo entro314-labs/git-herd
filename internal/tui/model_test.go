@@ -93,14 +93,8 @@ func TestNewModelWithTimeout(t *testing.T) {
 		t.Error("Expected context to be initialized")
 	}
 
-	// Check that context has deadline
-	deadline, ok := model.ctx.Deadline()
-	if !ok {
-		t.Error("Expected context to have deadline when timeout is set")
-	}
-
-	if time.Until(deadline) > 6*time.Second {
-		t.Error("Expected context deadline to be approximately 5 seconds from now")
+	if _, ok := model.ctx.Deadline(); ok {
+		t.Error("Expected shared model context to avoid a run-wide deadline")
 	}
 }
 
