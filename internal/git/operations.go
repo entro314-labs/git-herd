@@ -96,6 +96,14 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 		repo.Duration = time.Since(start)
 	}()
 
+	repoCtx, cancel := p.operationContext(ctx)
+	defer cancel()
+
+	if err := repoCtx.Err(); err != nil {
+		repo.Error = err
+		return repo
+	}
+
 	// Analyze repo first (moved from scanning phase for better performance)
 	p.AnalyzeRepo(&repo)
 
@@ -105,14 +113,24 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 
 	// Discard specific files if configured
 	if len(p.config.DiscardFiles) > 0 && !repo.Clean {
+		if err := repoCtx.Err(); err != nil {
+			repo.Error = err
+			return repo
+		}
+
 		gitRepo, err := gogit.PlainOpen(repo.Path)
 		if err != nil {
 			repo.Error = fmt.Errorf("failed to open repository for discard: %w", err)
 			return repo
 		}
 
-		if err := p.discardFiles(ctx, gitRepo, &repo); err != nil {
+		if err := p.discardFiles(repoCtx, gitRepo, &repo); err != nil {
 			repo.Error = fmt.Errorf("failed to discard files: %w", err)
+			return repo
+		}
+
+		if err := repoCtx.Err(); err != nil {
+			repo.Error = err
 			return repo
 		}
 
@@ -133,9 +151,9 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 	var err error
 	switch p.config.Operation {
 	case types.OperationFetch:
-		err = p.fetchRepo(ctx, repo.Path)
+		err = p.fetchRepo(repoCtx, repo.Path)
 	case types.OperationPull:
-		err = p.pullRepo(ctx, repo.Path)
+		err = p.pullRepo(repoCtx, repo.Path)
 	case types.OperationScan:
 		// Scan operation - analysis already done in AnalyzeRepo
 		return repo
@@ -148,11 +166,30 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 	return repo
 }
 
+func (p *Processor) operationContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if p.config.Timeout <= 0 {
+		return parent, func() {}
+	}
+
+	return context.WithTimeout(parent, p.config.Timeout)
+}
+
+// gitEnv returns the environment for git subprocesses with interactive
+// credential prompts disabled so commands fail fast instead of hanging
+// when authentication is required.
+func gitEnv() []string {
+	return append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_ASKPASS=",
+		"SSH_ASKPASS=",
+	)
+}
+
 // fetchRepo performs git fetch on a repository
 func (p *Processor) fetchRepo(ctx context.Context, repoPath string) error {
 	cmd := exec.CommandContext(ctx, "git", "fetch", "origin")
 	cmd.Dir = repoPath
-	cmd.Env = os.Environ()
+	cmd.Env = gitEnv()
 
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("fetch failed: %w (output: %s)", err, string(output))
@@ -165,7 +202,7 @@ func (p *Processor) fetchRepo(ctx context.Context, repoPath string) error {
 func (p *Processor) pullRepo(ctx context.Context, repoPath string) error {
 	cmd := exec.CommandContext(ctx, "git", "pull", "origin")
 	cmd.Dir = repoPath
-	cmd.Env = os.Environ()
+	cmd.Env = gitEnv()
 
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("pull failed: %w (output: %s)", err, string(output))
@@ -233,7 +270,7 @@ func (p *Processor) discardFiles(ctx context.Context, gitRepo *gogit.Repository,
 			// Use git command to discard changes to specific file
 			cmd := exec.CommandContext(ctx, "git", "checkout", "HEAD", "--", file)
 			cmd.Dir = repo.Path
-			cmd.Env = os.Environ()
+			cmd.Env = gitEnv()
 
 			if output, err := cmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("failed to discard %s: %w (output: %s)", file, err, string(output))

@@ -1,4 +1,4 @@
-# Release Workflow — git-herd
+# Release Workflow - git-herd
 # Triggers on version tags (v*.*.*) and creates GitHub releases
 # Includes Cosign signing and post-release verification
 

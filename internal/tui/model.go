@@ -46,22 +46,7 @@ func NewModel(parentCtx context.Context, config *types.Config, rootPath string) 
 		parentCtx = context.Background()
 	}
 
-	baseCtx := parentCtx
-	var timeoutCancel context.CancelFunc
-	if config.Timeout > 0 {
-		if _, hasDeadline := parentCtx.Deadline(); !hasDeadline {
-			baseCtx, timeoutCancel = context.WithTimeout(baseCtx, config.Timeout)
-		}
-	}
-
-	ctx, cancel := context.WithCancel(baseCtx)
-	combinedCancel := cancel
-	if timeoutCancel != nil {
-		combinedCancel = func() {
-			cancel()
-			timeoutCancel()
-		}
-	}
+	ctx, cancel := context.WithCancel(parentCtx)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -73,7 +58,7 @@ func NewModel(parentCtx context.Context, config *types.Config, rootPath string) 
 		config:    config,
 		rootPath:  rootPath,
 		ctx:       ctx,
-		cancel:    combinedCancel,
+		cancel:    cancel,
 		scanner:   git.NewScanner(config),
 		processor: git.NewProcessor(config),
 		phase:     "initializing",

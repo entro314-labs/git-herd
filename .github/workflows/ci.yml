@@ -1,4 +1,4 @@
-# CI Workflow — git-herd
+# CI Workflow - git-herd
 # Runs tests, linting, security scanning, build verification, and GoReleaser snapshot
 
 name: CI
@@ -46,7 +46,7 @@ jobs:
         run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         if: matrix.os == 'ubuntu-latest'
         with:
           files: ./coverage.out
@@ -70,7 +70,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.11.3
+          version: v2.12.2
           args: --timeout=5m
 
   security:

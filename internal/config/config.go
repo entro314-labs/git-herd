@@ -45,7 +45,7 @@ func SetupFlags(cmd *cobra.Command, config *types.Config) {
 	cmd.Flags().BoolVarP(&config.PlainMode, "plain", "p", false, "Use plain text output instead of TUI")
 	cmd.Flags().BoolVarP(&config.FullSummary, "full-summary", "f", false, "Display full summary of all repositories")
 	cmd.Flags().StringVarP(&config.SaveReport, "save-report", "", "", "Save detailed report to file (e.g., report.txt)")
-	cmd.Flags().DurationVarP(&config.Timeout, "timeout", "t", 5*time.Minute, "Overall operation timeout")
+	cmd.Flags().DurationVarP(&config.Timeout, "timeout", "t", 5*time.Minute, "Per-repository operation timeout")
 	cmd.Flags().StringSliceVarP(&config.ExcludeDirs, "exclude", "e", []string{".git", "node_modules", "vendor"}, "Directories to exclude")
 	cmd.Flags().StringSliceVarP(&config.DiscardFiles, "discard-files", "d", []string{".DS_Store", "package.json", "pnpm-lock.yaml"}, "File patterns to discard changes before pull/fetch (e.g., .DS_Store,package.json,pnpm-lock.yaml)")
 	cmd.Flags().StringVarP(&config.ExportScan, "export-scan", "", "", "Export repository scan to markdown file (use with -o scan)")

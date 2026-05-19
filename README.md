@@ -75,7 +75,7 @@ Flags:
   -o, --operation string     Operation to perform: fetch, pull, or scan (default "fetch")
   -r, --recursive            Process repositories recursively (default true)
   -s, --skip-dirty           Skip repositories with uncommitted changes (default true)
-  -t, --timeout duration     Overall operation timeout (default 5m0s)
+  -t, --timeout duration     Per-repository operation timeout (default 5m0s)
   -v, --verbose              Enable verbose logging
   -w, --workers int          Number of concurrent workers (default 5)
   -d, --discard-files strings File patterns to discard before pull/fetch (e.g., package.json)
@@ -127,7 +127,7 @@ Environment variables use the `GIT_HERD_` prefix with dashes replaced by undersc
 ### Safety Features
 
 - **Dirty Repository Handling**: By default, repositories with uncommitted changes are skipped when pulling
-- **Timeout Protection**: Configurable timeout prevents hanging operations
+- **Timeout Protection**: Configurable timeout prevents an individual repository operation from hanging forever
 - **Graceful Shutdown**: SIGINT/SIGTERM handling allows clean cancellation
 - **Error Isolation**: Failures in one repository don't affect others
 
@@ -180,7 +180,7 @@ git-herd -o scan --export-scan repos.md ~/Projects
 For better performance with many repositories:
 
 ```bash
-# Increase workers and timeout for large collections
+# Increase workers for large collections and relax the per-repo timeout for slow remotes
 git-herd -w 20 -t 15m ~/all-projects
 
 # Process only direct subdirectories (not recursive)
@@ -259,7 +259,7 @@ alias gfp='git-herd ~/Projects'
 
 git-herd provides detailed error reporting and handles common scenarios:
 
-- **Network timeouts**: Configurable timeout handling
+- **Network timeouts**: Configurable per-repository timeout handling
 - **Authentication failures**: Clear error messages for auth issues
 - **Dirty repositories**: Safe skipping with clear reporting
 - **Missing remotes**: Graceful handling of repositories without remotes
