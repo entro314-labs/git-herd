@@ -88,13 +88,14 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string, onProgress fun
 			if onProgress != nil {
 				onProgress(currentCount)
 			}
-
-			// Skip subdirectories if not recursive
-			if !s.config.Recursive {
-				return fs.SkipDir
-			}
-		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		} else if !errors.Is(err, fs.ErrNotExist) {
 			return err
+		}
+
+		// In non-recursive mode only the root and its direct subdirectories
+		// are considered, so never descend below the first level.
+		if !s.config.Recursive && entryPath != "." {
+			return fs.SkipDir
 		}
 
 		return nil

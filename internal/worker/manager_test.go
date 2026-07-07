@@ -1,6 +1,10 @@
 package worker
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +42,33 @@ func TestNew(t *testing.T) {
 
 	if manager.processor == nil {
 		t.Error("Processor not initialized")
+	}
+}
+
+func TestExecutePlainModePersistsReportWithNoRepos(t *testing.T) {
+	emptyDir := t.TempDir()
+	reportPath := filepath.Join(t.TempDir(), "report.txt")
+
+	config := &types.Config{
+		Workers:    1,
+		Operation:  types.OperationFetch,
+		PlainMode:  true,
+		SaveReport: reportPath,
+		Timeout:    time.Minute,
+	}
+
+	manager := New(config)
+	if err := manager.Execute(context.Background(), emptyDir); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	content, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("expected report to be written even with zero repositories: %v", err)
+	}
+
+	if !strings.Contains(string(content), "Total Repositories: 0") {
+		t.Errorf("expected report to record zero repositories, got:\n%s", content)
 	}
 }
 

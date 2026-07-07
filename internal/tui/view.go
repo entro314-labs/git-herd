@@ -134,17 +134,19 @@ func (m *Model) renderSummary() string {
 	// Results
 	successful := 0
 	failed := 0
+	skipped := 0
 
 	for _, result := range m.results {
 		if result.Error != nil {
-			failed++
 			if errors.Is(result.Error, types.ErrRepoSkipped) {
+				skipped++
 				fmt.Fprintf(&content, "%s %s (%s): %s\n",
 					infoStyle.Render("⊝"),
 					result.Name,
 					result.Path,
 					result.Error.Error())
 			} else {
+				failed++
 				fmt.Fprintf(&content, "%s %s (%s): %s\n",
 					errorStyle.Render("✗"),
 					result.Name,
@@ -168,23 +170,10 @@ func (m *Model) renderSummary() string {
 		}
 	}
 
-	// Count skipped separately from failed
-	skipped := 0
-	actualFailed := 0
-	for _, result := range m.results {
-		if result.Error != nil {
-			if errors.Is(result.Error, types.ErrRepoSkipped) {
-				skipped++
-			} else {
-				actualFailed++
-			}
-		}
-	}
-
 	// Summary box
 	summaryText := fmt.Sprintf("📊 Summary: %s successful, %s failed, %s skipped, %s total",
 		successStyle.Render(fmt.Sprintf("%d", successful)),
-		errorStyle.Render(fmt.Sprintf("%d", actualFailed)),
+		errorStyle.Render(fmt.Sprintf("%d", failed)),
 		infoStyle.Render(fmt.Sprintf("%d", skipped)),
 		infoStyle.Render(fmt.Sprintf("%d", len(m.results))))
 

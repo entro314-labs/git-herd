@@ -17,12 +17,13 @@ dry-run: false
 
 # Process repositories recursively in subdirectories
 # true: Find repos in all subdirectories
-# false: Only process repos in immediate subdirectories
+# false: Only process the root and its immediate subdirectories
 recursive: true
 
-# Whether to skip repositories with uncommitted changes
-# true: Skip dirty repos (recommended for pull operations)
-# false: Attempt operation on all repos
+# Whether to skip repositories with uncommitted changes when pulling
+# (fetch and scan are read-only for the worktree and are never skipped)
+# true: Skip dirty repos on pull (recommended)
+# false: Attempt pull on all repos
 skip-dirty: true
 
 # Enable verbose logging for debugging
