@@ -28,7 +28,7 @@ func DefaultConfig() *types.Config {
 		PlainMode:    false,
 		FullSummary:  false,
 		SaveReport:   "",
-		DiscardFiles: []string{".DS_Store", "package.json", "pnpm-lock.yaml"},
+		DiscardFiles: []string{},
 		ExportScan:   "",
 	}
 }
@@ -40,14 +40,14 @@ func SetupFlags(cmd *cobra.Command, config *types.Config) {
 	cmd.Flags().IntVarP(&config.Workers, "workers", "w", 5, "Number of concurrent workers")
 	cmd.Flags().BoolVarP(&config.DryRun, "dry-run", "n", false, "Show what would be done without executing")
 	cmd.Flags().BoolVarP(&config.Recursive, "recursive", "r", true, "Process repositories recursively")
-	cmd.Flags().BoolVarP(&config.SkipDirty, "skip-dirty", "s", true, "Skip repositories with uncommitted changes")
+	cmd.Flags().BoolVarP(&config.SkipDirty, "skip-dirty", "s", true, "Skip repositories with uncommitted changes when pulling")
 	cmd.Flags().BoolVarP(&config.Verbose, "verbose", "v", false, "Enable verbose logging")
 	cmd.Flags().BoolVarP(&config.PlainMode, "plain", "p", false, "Use plain text output instead of TUI")
 	cmd.Flags().BoolVarP(&config.FullSummary, "full-summary", "f", false, "Display full summary of all repositories")
 	cmd.Flags().StringVarP(&config.SaveReport, "save-report", "", "", "Save detailed report to file (e.g., report.txt)")
 	cmd.Flags().DurationVarP(&config.Timeout, "timeout", "t", 5*time.Minute, "Per-repository operation timeout")
 	cmd.Flags().StringSliceVarP(&config.ExcludeDirs, "exclude", "e", []string{".git", "node_modules", "vendor"}, "Directories to exclude")
-	cmd.Flags().StringSliceVarP(&config.DiscardFiles, "discard-files", "d", []string{".DS_Store", "package.json", "pnpm-lock.yaml"}, "File patterns to discard changes before pull/fetch (e.g., .DS_Store,package.json,pnpm-lock.yaml)")
+	cmd.Flags().StringSliceVarP(&config.DiscardFiles, "discard-files", "d", []string{}, "File patterns to discard changes before pull/fetch (e.g., .DS_Store,package.json,pnpm-lock.yaml)")
 	cmd.Flags().StringVarP(&config.ExportScan, "export-scan", "", "", "Export repository scan to markdown file (use with -o scan)")
 }
 

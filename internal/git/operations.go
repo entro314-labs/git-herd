@@ -2,10 +2,12 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -82,10 +84,20 @@ func (p *Processor) AnalyzeRepo(repo *types.GitRepo) {
 		}
 	}
 
-	// Get remote information
+	// Get remote information, preferring "origin" and falling back to the
+	// alphabetically first remote for deterministic behavior.
 	remotes, err := gitRepo.Remotes()
 	if err == nil && len(remotes) > 0 {
-		repo.Remote = remotes[0].Config().Name
+		names := make([]string, 0, len(remotes))
+		for _, remote := range remotes {
+			names = append(names, remote.Config().Name)
+		}
+		slices.Sort(names)
+		if slices.Contains(names, gogit.DefaultRemoteName) {
+			repo.Remote = gogit.DefaultRemoteName
+		} else {
+			repo.Remote = names[0]
+		}
 	}
 }
 
@@ -100,7 +112,7 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 	defer cancel()
 
 	if err := repoCtx.Err(); err != nil {
-		repo.Error = err
+		repo.Error = classifyContextErr(err)
 		return repo
 	}
 
@@ -111,10 +123,16 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 		return repo
 	}
 
-	// Discard specific files if configured
+	// Scan is read-only: analysis is already done, never mutate the worktree.
+	if p.config.Operation == types.OperationScan {
+		return repo
+	}
+
+	// Discard specific files if configured. Dry-run previews the discard
+	// outcome without mutating the worktree.
 	if len(p.config.DiscardFiles) > 0 && !repo.Clean {
 		if err := repoCtx.Err(); err != nil {
-			repo.Error = err
+			repo.Error = classifyContextErr(err)
 			return repo
 		}
 
@@ -124,23 +142,44 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 			return repo
 		}
 
-		if err := p.discardFiles(repoCtx, gitRepo, &repo); err != nil {
+		tracked, untracked, allMatch, err := p.planDiscard(gitRepo, &repo)
+		if err != nil {
 			repo.Error = fmt.Errorf("failed to discard files: %w", err)
 			return repo
 		}
 
-		if err := repoCtx.Err(); err != nil {
-			repo.Error = err
-			return repo
-		}
+		if allMatch {
+			if p.config.DryRun {
+				// The discard would leave the worktree clean, so the skip
+				// decision below must reflect the post-discard state.
+				repo.Clean = true
+			} else {
+				if err := p.executeDiscard(repoCtx, &repo, tracked, untracked); err != nil {
+					repo.Error = fmt.Errorf("failed to discard files: %w", err)
+					return repo
+				}
 
-		// Re-analyze after discarding files
-		p.AnalyzeRepo(&repo)
+				if err := repoCtx.Err(); err != nil {
+					repo.Error = classifyContextErr(err)
+					return repo
+				}
+
+				// Re-analyze after discarding files
+				p.AnalyzeRepo(&repo)
+			}
+		}
 	}
 
-	// Skip dirty repos if configured (but not for scan operation)
-	if p.config.SkipDirty && !repo.Clean && p.config.Operation != types.OperationScan {
+	// Skip dirty repos if configured. Only pull merges into the worktree;
+	// fetch is safe on dirty repositories.
+	if p.config.SkipDirty && !repo.Clean && p.config.Operation == types.OperationPull {
 		repo.Error = fmt.Errorf("%w: uncommitted changes", types.ErrRepoSkipped)
+		return repo
+	}
+
+	// Repositories without a remote have nothing to fetch or pull from.
+	if repo.Remote == "" {
+		repo.Error = fmt.Errorf("%w: no remote configured", types.ErrRepoSkipped)
 		return repo
 	}
 
@@ -151,19 +190,30 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 	var err error
 	switch p.config.Operation {
 	case types.OperationFetch:
-		err = p.fetchRepo(repoCtx, repo.Path)
+		err = p.fetchRepo(repoCtx, repo.Path, repo.Remote)
 	case types.OperationPull:
-		err = p.pullRepo(repoCtx, repo.Path)
-	case types.OperationScan:
-		// Scan operation - analysis already done in AnalyzeRepo
-		return repo
+		err = p.pullRepo(repoCtx, repo.Path, repo.Remote)
 	}
 
 	if err != nil {
-		repo.Error = err
+		// A command killed by user cancellation is not a repository failure.
+		if ctxErr := ctx.Err(); errors.Is(ctxErr, context.Canceled) {
+			err = ctxErr
+		}
+		repo.Error = classifyContextErr(err)
 	}
 
 	return repo
+}
+
+// classifyContextErr converts user cancellation into a skip so interrupted
+// repositories are reported as skipped instead of failed. Per-repository
+// timeouts (context.DeadlineExceeded) remain genuine failures.
+func classifyContextErr(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("%w: operation cancelled", types.ErrRepoSkipped)
+	}
+	return err
 }
 
 func (p *Processor) operationContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -186,8 +236,8 @@ func gitEnv() []string {
 }
 
 // fetchRepo performs git fetch on a repository
-func (p *Processor) fetchRepo(ctx context.Context, repoPath string) error {
-	cmd := exec.CommandContext(ctx, "git", "fetch", "origin")
+func (p *Processor) fetchRepo(ctx context.Context, repoPath, remote string) error {
+	cmd := exec.CommandContext(ctx, "git", "fetch", remote)
 	cmd.Dir = repoPath
 	cmd.Env = gitEnv()
 
@@ -199,8 +249,8 @@ func (p *Processor) fetchRepo(ctx context.Context, repoPath string) error {
 }
 
 // pullRepo performs git pull on a repository
-func (p *Processor) pullRepo(ctx context.Context, repoPath string) error {
-	cmd := exec.CommandContext(ctx, "git", "pull", "origin")
+func (p *Processor) pullRepo(ctx context.Context, repoPath, remote string) error {
+	cmd := exec.CommandContext(ctx, "git", "pull", remote)
 	cmd.Dir = repoPath
 	cmd.Env = gitEnv()
 
@@ -211,23 +261,22 @@ func (p *Processor) pullRepo(ctx context.Context, repoPath string) error {
 	return nil
 }
 
-// discardFiles discards changes to specific files matching the configured patterns
-func (p *Processor) discardFiles(ctx context.Context, gitRepo *gogit.Repository, repo *types.GitRepo) error {
+// planDiscard determines which modified files match the configured discard
+// patterns, separating tracked files (restored from HEAD) from untracked
+// files (removed, since HEAD has no version of them). allMatch is false when
+// any modified file does not match the patterns: the user has legitimate
+// changes, so nothing should be discarded.
+func (p *Processor) planDiscard(gitRepo *gogit.Repository, repo *types.GitRepo) (tracked, untracked []string, allMatch bool, err error) {
 	worktree, err := gitRepo.Worktree()
 	if err != nil {
-		return fmt.Errorf("failed to get worktree: %w", err)
+		return nil, nil, false, fmt.Errorf("failed to get worktree: %w", err)
 	}
 
 	status, err := worktree.Status()
 	if err != nil {
-		return fmt.Errorf("failed to get status: %w", err)
+		return nil, nil, false, fmt.Errorf("failed to get status: %w", err)
 	}
 
-	// Track which files were discarded
-	var discardedFiles []string
-
-	// First pass: check if there are ANY files that do NOT match the discard patterns
-	// If there are, we shouldn't discard anything because the user has legitimate changes
 	for file, fileStatus := range status {
 		if fileStatus.Worktree == gogit.Unmodified && fileStatus.Staging == gogit.Unmodified {
 			continue
@@ -235,16 +284,16 @@ func (p *Processor) discardFiles(ctx context.Context, gitRepo *gogit.Repository,
 
 		cleanPath := filepath.Clean(file)
 		if filepath.IsAbs(cleanPath) || cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(os.PathSeparator)) {
-			return fmt.Errorf("invalid file path from git status: %q", file)
+			return nil, nil, false, fmt.Errorf("invalid file path from git status: %q", file)
 		}
 
 		// Check if file matches any discard pattern
 		matches := false
 		for _, pattern := range p.config.DiscardFiles {
 			// Support both exact matches and glob patterns
-			matched, err := filepath.Match(pattern, filepath.Base(file))
-			if err != nil {
-				return fmt.Errorf("invalid discard pattern %q: %w", pattern, err)
+			matched, matchErr := filepath.Match(pattern, filepath.Base(file))
+			if matchErr != nil {
+				return nil, nil, false, fmt.Errorf("invalid discard pattern %q: %w", pattern, matchErr)
 			}
 			if matched || file == pattern || filepath.Base(file) == pattern {
 				matches = true
@@ -258,28 +307,46 @@ func (p *Processor) discardFiles(ctx context.Context, gitRepo *gogit.Repository,
 			if p.config.Verbose {
 				fmt.Printf("  Keeping changes in %s because %s is modified and doesn't match discard patterns\n", repo.Name, file)
 			}
-			return nil
+			return nil, nil, false, nil
 		}
 
-		discardedFiles = append(discardedFiles, file)
+		if fileStatus.Staging == gogit.Untracked && fileStatus.Worktree == gogit.Untracked {
+			untracked = append(untracked, file)
+		} else {
+			tracked = append(tracked, file)
+		}
 	}
 
-	// If we have files to discard, use git checkout to reset them
-	if len(discardedFiles) > 0 {
-		for _, file := range discardedFiles {
-			// Use git command to discard changes to specific file
-			cmd := exec.CommandContext(ctx, "git", "checkout", "HEAD", "--", file)
-			cmd.Dir = repo.Path
-			cmd.Env = gitEnv()
+	return tracked, untracked, true, nil
+}
 
-			if output, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("failed to discard %s: %w (output: %s)", file, err, string(output))
-			}
-		}
+// executeDiscard restores tracked files from HEAD and removes untracked ones.
+func (p *Processor) executeDiscard(ctx context.Context, repo *types.GitRepo, tracked, untracked []string) error {
+	for _, file := range tracked {
+		cmd := exec.CommandContext(ctx, "git", "checkout", "HEAD", "--", file)
+		cmd.Dir = repo.Path
+		cmd.Env = gitEnv()
 
-		if p.config.Verbose {
-			fmt.Printf("  Discarded changes in %s: %v\n", repo.Name, discardedFiles)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to discard %s: %w (output: %s)", file, err, string(output))
 		}
+	}
+
+	// `git checkout HEAD` would fail for untracked files because HEAD has no
+	// version of them, so remove them instead. -x also removes files covered
+	// by ignore rules: the discard pattern matched them explicitly.
+	for _, file := range untracked {
+		cmd := exec.CommandContext(ctx, "git", "clean", "-f", "-x", "--", file)
+		cmd.Dir = repo.Path
+		cmd.Env = gitEnv()
+
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to remove untracked %s: %w (output: %s)", file, err, string(output))
+		}
+	}
+
+	if p.config.Verbose && (len(tracked) > 0 || len(untracked) > 0) {
+		fmt.Printf("  Discarded changes in %s: %v\n", repo.Name, append(tracked, untracked...))
 	}
 
 	return nil

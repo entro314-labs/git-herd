@@ -70,13 +70,14 @@ func (m *Manager) Execute(ctx context.Context, rootPath string) error {
 			finalErr = errors.Join(finalErr, ctx.Err())
 		}
 
-		if len(results) == 0 {
-			return finalErr
-		}
-
 		successful, failed, skipped := summarizeResults(results)
-		if persistErr := m.persistArtifacts(ctx, results, successful, failed, skipped); persistErr != nil {
-			finalErr = errors.Join(finalErr, persistErr)
+		// Persist artifacts when the run completed, even with zero repositories,
+		// so a requested report always reflects the committed outcome. Skip
+		// persisting only when the run errored before producing any results.
+		if finalErr == nil || len(results) > 0 {
+			if persistErr := m.persistArtifacts(ctx, results, successful, failed, skipped); persistErr != nil {
+				finalErr = errors.Join(finalErr, persistErr)
+			}
 		}
 		if failed > 0 {
 			finalErr = errors.Join(finalErr, fmt.Errorf("%d repositories failed", failed))
@@ -115,7 +116,7 @@ func (m *Manager) executeInPlainMode(ctx context.Context, rootPath string) error
 
 	if len(repos) == 0 {
 		m.logger.InfoContext(ctx, "No git repositories found")
-		return nil
+		return m.persistArtifacts(ctx, nil, 0, 0, 0)
 	}
 
 	m.logger.InfoContext(ctx, "Found repositories", "count", len(repos))
@@ -181,45 +182,29 @@ func (m *Manager) displayResults(ctx context.Context, resultChan <-chan types.Gi
 			} else {
 				failed++
 			}
-			if m.config.FullSummary {
-				fmt.Printf("❌ %s (%s): %v\n", result.Name, result.Path, result.Error)
-			}
 		} else {
 			successful++
-			status := "✅"
-			if m.config.DryRun {
-				status = "🔍"
-			}
-			if m.config.FullSummary {
-				fmt.Printf("%s %s (%s) [%s@%s] - %v\n",
-					status, result.Name, result.Path, result.Branch, result.Remote, result.Duration.Truncate(time.Millisecond))
-			}
+		}
+
+		if m.config.FullSummary {
+			m.displaySingleResult(result)
 		}
 	}
 
 	// Show condensed view if not full summary
 	if !m.config.FullSummary {
-		// Show only first few and last few results
-		displayCount := 5
+		const displayCount = 5
 		if len(allResults) <= displayCount*2 {
-			displayCount = len(allResults) / 2
-		}
-
-		for i, result := range allResults[:displayCount] {
-			m.displaySingleResult(result, i == 0)
-		}
-
-		if len(allResults) > displayCount*2 {
-			fmt.Printf("... (%d more repositories) ...\n", len(allResults)-displayCount*2)
-		}
-
-		if len(allResults) > displayCount {
-			start := len(allResults) - displayCount
-			if len(allResults) <= displayCount*2 {
-				start = displayCount
+			for _, result := range allResults {
+				m.displaySingleResult(result)
 			}
-			for _, result := range allResults[start:] {
-				m.displaySingleResult(result, false)
+		} else {
+			for _, result := range allResults[:displayCount] {
+				m.displaySingleResult(result)
+			}
+			fmt.Printf("... (%d more repositories) ...\n", len(allResults)-displayCount*2)
+			for _, result := range allResults[len(allResults)-displayCount:] {
+				m.displaySingleResult(result)
 			}
 		}
 	}
@@ -283,7 +268,7 @@ func (m *Manager) persistArtifacts(ctx context.Context, results []types.GitRepo,
 }
 
 // displaySingleResult displays a single repository result
-func (m *Manager) displaySingleResult(result types.GitRepo, isFirst bool) {
+func (m *Manager) displaySingleResult(result types.GitRepo) {
 	if result.Error != nil {
 		if errors.Is(result.Error, types.ErrRepoSkipped) {
 			fmt.Printf("⊝ %s (%s): %v\n", result.Name, result.Path, result.Error)

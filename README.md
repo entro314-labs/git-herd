@@ -74,7 +74,7 @@ Flags:
   -h, --help                 help for git-herd
   -o, --operation string     Operation to perform: fetch, pull, or scan (default "fetch")
   -r, --recursive            Process repositories recursively (default true)
-  -s, --skip-dirty           Skip repositories with uncommitted changes (default true)
+  -s, --skip-dirty           Skip repositories with uncommitted changes when pulling (default true)
   -t, --timeout duration     Per-repository operation timeout (default 5m0s)
   -v, --verbose              Enable verbose logging
   -w, --workers int          Number of concurrent workers (default 5)
@@ -126,7 +126,7 @@ Environment variables use the `GIT_HERD_` prefix with dashes replaced by undersc
 
 ### Safety Features
 
-- **Dirty Repository Handling**: By default, repositories with uncommitted changes are skipped when pulling
+- **Dirty Repository Handling**: By default, repositories with uncommitted changes are skipped when pulling (fetch is always safe and never skipped for dirty state)
 - **Timeout Protection**: Configurable timeout prevents an individual repository operation from hanging forever
 - **Graceful Shutdown**: SIGINT/SIGTERM handling allows clean cancellation
 - **Error Isolation**: Failures in one repository don't affect others
@@ -183,7 +183,7 @@ For better performance with many repositories:
 # Increase workers for large collections and relax the per-repo timeout for slow remotes
 git-herd -w 20 -t 15m ~/all-projects
 
-# Process only direct subdirectories (not recursive)
+# Process only the root and its direct subdirectories (not recursive)
 git-herd -r=false ~/Projects
 ```
 
