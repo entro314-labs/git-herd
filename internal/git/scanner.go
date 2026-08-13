@@ -67,7 +67,7 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string, onProgress fun
 
 		// Check if this is a git repository
 		gitPath := path.Join(entryPath, ".git")
-		if _, err := root.Stat(gitPath); err == nil {
+		if fi, err := root.Stat(gitPath); err == nil {
 			repoPath := rootPath
 			if entryPath != "." {
 				repoPath = filepath.Join(rootPath, filepath.FromSlash(entryPath))
@@ -76,6 +76,20 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string, onProgress fun
 				Path:   repoPath,
 				Name:   filepath.Base(repoPath),
 				HasGit: true,
+			}
+
+			// A regular ".git" file is a gitlink: the real git directory lives
+			// elsewhere. Submodules and linked worktrees both use this form.
+			// Resolve it now so a dangling gitlink is reported precisely rather
+			// than surfacing later as an opaque "repository does not exist".
+			if !fi.IsDir() {
+				repo.IsSubmodule = true
+				gitDir, resolveErr := resolveGitlink(repoPath)
+				if resolveErr != nil {
+					repo.Error = resolveErr
+				} else {
+					repo.GitDir = gitDir
+				}
 			}
 
 			// Don't analyze repo here - defer to processing phase for better performance
@@ -106,6 +120,52 @@ func (s *Scanner) FindRepos(ctx context.Context, rootPath string, onProgress fun
 	}
 
 	return repos, nil
+}
+
+// gitlinkPrefix is the marker git writes into a ".git" file to point at the
+// real git directory.
+const gitlinkPrefix = "gitdir:"
+
+// resolveGitlink reads the ".git" file at worktreePath and returns the absolute
+// git directory it points to. A relative target is resolved against the working
+// tree, matching git's own behavior. It returns ErrBrokenGitlink when the target
+// is absent, which is the normal state for a submodule in a repository cloned
+// without --recurse-submodules.
+func resolveGitlink(worktreePath string) (string, error) {
+	gitFile := filepath.Join(worktreePath, ".git")
+
+	data, err := os.ReadFile(gitFile)
+	if err != nil {
+		return "", fmt.Errorf("%w: reading %s: %w", types.ErrBrokenGitlink, gitFile, err)
+	}
+
+	contents := strings.TrimSpace(string(data))
+	target, ok := strings.CutPrefix(contents, gitlinkPrefix)
+	if !ok {
+		return "", fmt.Errorf("%w: %s has no %q marker", types.ErrBrokenGitlink, gitFile, gitlinkPrefix)
+	}
+
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", fmt.Errorf("%w: %s names an empty git directory", types.ErrBrokenGitlink, gitFile)
+	}
+
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(worktreePath, target)
+	}
+	target = filepath.Clean(target)
+
+	if _, err := os.Stat(target); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf(
+				"%w: %s points to %s, which does not exist (submodule not initialized; run 'git submodule update --init' in the parent repository)",
+				types.ErrBrokenGitlink, gitFile, target,
+			)
+		}
+		return "", fmt.Errorf("%w: stat %s: %w", types.ErrBrokenGitlink, target, err)
+	}
+
+	return target, nil
 }
 
 func (s *Scanner) isExcludedPath(entryPath string) bool {
