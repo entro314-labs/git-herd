@@ -26,6 +26,13 @@ recursive: true
 # false: Attempt pull on all repos
 skip-dirty: true
 
+# Whether to treat submodules as standalone repositories.
+# A submodule is pinned to a commit by its parent, so pulling it on its own
+# moves it off that commit and leaves the parent with a dirty gitlink.
+# false: Skip submodules; update them via their parent (recommended)
+# true:  Pull/fetch submodules independently
+with-submodules: false
+
 # Enable verbose logging for debugging
 # true: Show detailed operation logs
 # false: Show only results and errors
@@ -40,8 +47,12 @@ full-summary: false
 # Save detailed report to file (empty string disables)
 save-report: ""
 
-# File patterns to discard before pull/fetch (empty list disables)
-discard-files: []
+# File patterns to discard before pull/fetch (empty list disables).
+# Worth setting on macOS: Finder rewrites .DS_Store constantly, and any repo
+# that tracks one is then permanently "dirty" and permanently skipped by
+# skip-dirty. Discarding it first lets those repos pull normally.
+discard-files:
+  - .DS_Store
 
 # Export repository scan to markdown file (requires operation: scan)
 export-scan: ""

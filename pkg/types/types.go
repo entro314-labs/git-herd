@@ -17,11 +17,20 @@ const (
 
 var ErrRepoSkipped = errors.New("repository skipped")
 
+// ErrBrokenGitlink marks a working tree whose ".git" is a gitlink file pointing
+// at a git directory that does not exist. This is common for submodules in
+// repositories cloned without --recurse-submodules, where ".git/modules/<name>"
+// was never populated. Reported separately so it is not confused with a
+// genuinely missing repository.
+var ErrBrokenGitlink = errors.New("broken gitlink")
+
 // GitRepo represents a git repository with its path and status
 type GitRepo struct {
 	Path          string
 	Name          string
 	HasGit        bool
+	IsSubmodule   bool   // ".git" is a gitlink file rather than a directory
+	GitDir        string // Resolved git directory (differs from Path/.git for submodules)
 	Clean         bool
 	Branch        string
 	Remote        string
@@ -34,19 +43,20 @@ type GitRepo struct {
 
 // Config holds application configuration
 type Config struct {
-	Workers      int           `mapstructure:"workers" json:"workers,omitzero"`
-	Operation    OperationType `mapstructure:"operation" json:"operation,omitzero"`
-	DryRun       bool          `mapstructure:"dry-run" json:"dry_run,omitzero"`
-	Recursive    bool          `mapstructure:"recursive" json:"recursive,omitzero"`
-	SkipDirty    bool          `mapstructure:"skip-dirty" json:"skip_dirty,omitzero"`
-	Verbose      bool          `mapstructure:"verbose" json:"verbose,omitzero"`
-	Timeout      time.Duration `mapstructure:"timeout" json:"timeout,omitzero"`
-	ExcludeDirs  []string      `mapstructure:"exclude" json:"exclude_dirs,omitzero"`
-	PlainMode    bool          `mapstructure:"plain" json:"plain_mode,omitzero"`            // Disable TUI for plain text output
-	FullSummary  bool          `mapstructure:"full-summary" json:"full_summary,omitzero"`   // Show full summary of all repositories
-	SaveReport   string        `mapstructure:"save-report" json:"save_report,omitzero"`     // File path to save detailed report
-	DiscardFiles []string      `mapstructure:"discard-files" json:"discard_files,omitzero"` // File patterns to discard before pull/fetch
-	ExportScan   string        `mapstructure:"export-scan" json:"export_scan,omitzero"`     // Export scan results to markdown file
+	Workers        int           `mapstructure:"workers" json:"workers,omitzero"`
+	Operation      OperationType `mapstructure:"operation" json:"operation,omitzero"`
+	DryRun         bool          `mapstructure:"dry-run" json:"dry_run,omitzero"`
+	Recursive      bool          `mapstructure:"recursive" json:"recursive,omitzero"`
+	SkipDirty      bool          `mapstructure:"skip-dirty" json:"skip_dirty,omitzero"`
+	WithSubmodules bool          `mapstructure:"with-submodules" json:"with_submodules,omitzero"` // Operate on submodules as standalone repos
+	Verbose        bool          `mapstructure:"verbose" json:"verbose,omitzero"`
+	Timeout        time.Duration `mapstructure:"timeout" json:"timeout,omitzero"`
+	ExcludeDirs    []string      `mapstructure:"exclude" json:"exclude_dirs,omitzero"`
+	PlainMode      bool          `mapstructure:"plain" json:"plain_mode,omitzero"`            // Disable TUI for plain text output
+	FullSummary    bool          `mapstructure:"full-summary" json:"full_summary,omitzero"`   // Show full summary of all repositories
+	SaveReport     string        `mapstructure:"save-report" json:"save_report,omitzero"`     // File path to save detailed report
+	DiscardFiles   []string      `mapstructure:"discard-files" json:"discard_files,omitzero"` // File patterns to discard before pull/fetch
+	ExportScan     string        `mapstructure:"export-scan" json:"export_scan,omitzero"`     // Export scan results to markdown file
 }
 
 // GitRepoResult represents the result of processing a git repository

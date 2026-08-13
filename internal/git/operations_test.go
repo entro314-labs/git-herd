@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -421,5 +422,88 @@ func TestOperationContextHonorsEarlierParentDeadline(t *testing.T) {
 	remaining := time.Until(deadline)
 	if remaining > 300*time.Millisecond {
 		t.Fatalf("expected parent deadline to win, got %v", remaining)
+	}
+}
+
+func TestProcessRepo_SkipsSubmoduleByDefault(t *testing.T) {
+	// A healthy repository, flagged as a submodule the way the scanner would
+	// after resolving a gitlink.
+	dir := initTestRepo(t)
+	addLocalRemote(t, dir, "origin")
+	repo := types.GitRepo{Path: dir, Name: "sub", HasGit: true, IsSubmodule: true}
+
+	p := NewProcessor(&types.Config{Operation: types.OperationPull, Timeout: time.Minute})
+	got := p.ProcessRepo(context.Background(), repo)
+
+	if !errors.Is(got.Error, types.ErrRepoSkipped) {
+		t.Errorf("Expected a submodule to be skipped on pull, got %v", got.Error)
+	}
+
+	// The skip must still report what was found, so the repo appears in
+	// summaries rather than vanishing.
+	if got.Branch != "main" {
+		t.Errorf("Expected a skipped submodule to still report its branch, got %q", got.Branch)
+	}
+}
+
+func TestProcessRepo_ProcessesSubmoduleWhenRequested(t *testing.T) {
+	dir := initTestRepo(t)
+	addLocalRemote(t, dir, "origin")
+	repo := types.GitRepo{Path: dir, Name: "sub", HasGit: true, IsSubmodule: true}
+
+	p := NewProcessor(&types.Config{
+		Operation:      types.OperationPull,
+		Timeout:        time.Minute,
+		WithSubmodules: true,
+	})
+	got := p.ProcessRepo(context.Background(), repo)
+
+	if errors.Is(got.Error, types.ErrRepoSkipped) {
+		t.Errorf("Expected --with-submodules to process the submodule, got %v", got.Error)
+	}
+}
+
+func TestProcessRepo_ScanAlwaysReportsSubmodules(t *testing.T) {
+	dir := initTestRepo(t)
+	addLocalRemote(t, dir, "origin")
+	repo := types.GitRepo{Path: dir, Name: "sub", HasGit: true, IsSubmodule: true}
+
+	p := NewProcessor(&types.Config{Operation: types.OperationScan, Timeout: time.Minute})
+	got := p.ProcessRepo(context.Background(), repo)
+
+	if got.Error != nil {
+		t.Errorf("Expected scan to report a submodule without error, got %v", got.Error)
+	}
+}
+
+func TestProcessRepo_BrokenGitlinkErrorSurvivesAnalysis(t *testing.T) {
+	// A gitlink diagnosed at scan time must not be overwritten by the generic
+	// "failed to open repository" error AnalyzeRepo would otherwise produce.
+	repo := types.GitRepo{
+		Path:        t.TempDir(),
+		Name:        "sub",
+		HasGit:      true,
+		IsSubmodule: true,
+		Error:       fmt.Errorf("%w: gitdir missing", types.ErrBrokenGitlink),
+	}
+
+	p := NewProcessor(&types.Config{Operation: types.OperationPull, Timeout: time.Minute})
+	got := p.ProcessRepo(context.Background(), repo)
+
+	if !errors.Is(got.Error, types.ErrBrokenGitlink) {
+		t.Errorf("Expected ErrBrokenGitlink to be preserved, got %v", got.Error)
+	}
+}
+
+func TestInvalidPathHint(t *testing.T) {
+	if got := invalidPathHint(nil); got != "" {
+		t.Errorf("Expected no hint for nil error, got %q", got)
+	}
+	if got := invalidPathHint(errors.New("some other failure")); got != "" {
+		t.Errorf("Expected no hint for an unrelated error, got %q", got)
+	}
+	got := invalidPathHint(errors.New(`invalid path "Icon\r": contains control character`))
+	if !strings.Contains(got, "Icon") {
+		t.Errorf("Expected an actionable hint mentioning the Icon file, got %q", got)
 	}
 }

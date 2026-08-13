@@ -75,6 +75,7 @@ Flags:
   -o, --operation string     Operation to perform: fetch, pull, or scan (default "fetch")
   -r, --recursive            Process repositories recursively (default true)
   -s, --skip-dirty           Skip repositories with uncommitted changes when pulling (default true)
+      --with-submodules      Pull/fetch submodules as standalone repos (default false)
   -t, --timeout duration     Per-repository operation timeout (default 5m0s)
   -v, --verbose              Enable verbose logging
   -w, --workers int          Number of concurrent workers (default 5)
@@ -95,11 +96,13 @@ workers: 10
 dry-run: false
 recursive: true
 skip-dirty: true
+with-submodules: false
 verbose: false
 plain: false
 full-summary: false
 save-report: ""
-discard-files: []
+discard-files:
+  - .DS_Store
 export-scan: ""
 timeout: 10m
 exclude:
@@ -127,9 +130,53 @@ Environment variables use the `GIT_HERD_` prefix with dashes replaced by undersc
 ### Safety Features
 
 - **Dirty Repository Handling**: By default, repositories with uncommitted changes are skipped when pulling (fetch is always safe and never skipped for dirty state)
+- **Submodule Handling**: Submodules are skipped by default; see below
 - **Timeout Protection**: Configurable timeout prevents an individual repository operation from hanging forever
 - **Graceful Shutdown**: SIGINT/SIGTERM handling allows clean cancellation
 - **Error Isolation**: Failures in one repository don't affect others
+
+### Submodules
+
+A submodule's working tree has a `.git` *file* (a "gitlink") pointing at the real
+git directory inside its parent, rather than a `.git` directory. git-herd
+discovers these and reports them, but skips them for `fetch` and `pull`, because
+a submodule is pinned to a specific commit by its parent: pulling one on its own
+moves it off that commit and leaves the parent with a dirty gitlink. Update them
+through the parent instead:
+
+```bash
+git submodule update --remote --recursive
+```
+
+Pass `--with-submodules` to operate on them anyway. `scan` always reports them.
+
+If a submodule reports **`broken gitlink`**, its gitlink points at a git
+directory that does not exist — the normal state after cloning a repository
+without `--recurse-submodules`, where `.git/modules/<name>` was never populated.
+Fix it from the parent repository:
+
+```bash
+git submodule update --init --recursive
+```
+
+### macOS: `.DS_Store` and `Icon` files
+
+Finder rewrites `.DS_Store` constantly. Any repository that *tracks* one is
+therefore permanently dirty and, with `skip-dirty` on, permanently skipped. Add
+it to `discard-files` (the shipped config does this) so those repositories can
+pull normally:
+
+```bash
+git-herd -o pull -d .DS_Store
+```
+
+Finder also writes an `Icon` file ending in a carriage return for custom folder
+icons. That trailing control character is not a valid git path, so status
+collection for the whole repository fails. Remove it with:
+
+```bash
+find . -name 'Icon?' -print -delete
+```
 
 ## Output Format
 
@@ -268,7 +315,7 @@ git-herd provides detailed error reporting and handles common scenarios:
 ## Building from Source
 
 Requirements:
-- Go 1.24 or later (tested with 1.25.x)
+- go 1.26 or later (tested with 1.25.x)
 
 ```bash
 git clone https://github.com/entro314-labs/git-herd

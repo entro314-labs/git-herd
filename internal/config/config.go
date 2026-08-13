@@ -41,6 +41,7 @@ func SetupFlags(cmd *cobra.Command, config *types.Config) {
 	cmd.Flags().BoolVarP(&config.DryRun, "dry-run", "n", false, "Show what would be done without executing")
 	cmd.Flags().BoolVarP(&config.Recursive, "recursive", "r", true, "Process repositories recursively")
 	cmd.Flags().BoolVarP(&config.SkipDirty, "skip-dirty", "s", true, "Skip repositories with uncommitted changes when pulling")
+	cmd.Flags().BoolVarP(&config.WithSubmodules, "with-submodules", "", false, "Pull/fetch submodules as standalone repos (they are pinned by their parent, so this can dirty the parent)")
 	cmd.Flags().BoolVarP(&config.Verbose, "verbose", "v", false, "Enable verbose logging")
 	cmd.Flags().BoolVarP(&config.PlainMode, "plain", "p", false, "Use plain text output instead of TUI")
 	cmd.Flags().BoolVarP(&config.FullSummary, "full-summary", "f", false, "Display full summary of all repositories")
@@ -90,8 +91,8 @@ func SetupViper(cmd *cobra.Command) error {
 	// Bind flags to viper
 	flags := []string{
 		"operation", "workers", "dry-run", "recursive", "skip-dirty",
-		"verbose", "plain", "full-summary", "save-report", "timeout", "exclude",
-		"discard-files", "export-scan",
+		"with-submodules", "verbose", "plain", "full-summary", "save-report",
+		"timeout", "exclude", "discard-files", "export-scan",
 	}
 
 	for _, name := range flags {

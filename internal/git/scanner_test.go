@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -200,5 +201,120 @@ func TestScanner_ExcludeDirectories(t *testing.T) {
 
 	if len(repos) > 0 && repos[0].Name != "project" {
 		t.Errorf("Expected to find 'project', got %s", repos[0].Name)
+	}
+}
+
+// writeGitlink creates a worktree directory whose ".git" is a gitlink file
+// pointing at target, mirroring how git records a submodule.
+func writeGitlink(t *testing.T, root, name, target string) string {
+	t.Helper()
+
+	worktree := filepath.Join(root, name)
+	if err := os.MkdirAll(worktree, 0755); err != nil {
+		t.Fatalf("Failed to create worktree %s: %v", worktree, err)
+	}
+
+	contents := "gitdir: " + target + "\n"
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte(contents), 0644); err != nil {
+		t.Fatalf("Failed to write gitlink: %v", err)
+	}
+
+	return worktree
+}
+
+func TestScanner_SubmoduleGitlinkResolves(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// The real git directory, as a parent repo's .git/modules/<name> would be.
+	realGitDir := filepath.Join(tmpDir, "parent", ".git", "modules", "sub")
+	if err := os.MkdirAll(realGitDir, 0755); err != nil {
+		t.Fatalf("Failed to create module dir: %v", err)
+	}
+
+	writeGitlink(t, filepath.Join(tmpDir, "parent"), "sub", "../.git/modules/sub")
+
+	config := &types.Config{Workers: 1, Operation: types.OperationScan, Recursive: true}
+	repos, err := NewScanner(config).FindRepos(context.Background(), tmpDir, nil)
+	if err != nil {
+		t.Fatalf("FindRepos failed: %v", err)
+	}
+
+	var sub *types.GitRepo
+	for i := range repos {
+		if repos[i].Name == "sub" {
+			sub = &repos[i]
+		}
+	}
+	if sub == nil {
+		t.Fatal("Expected the submodule worktree to be discovered")
+	}
+
+	if !sub.IsSubmodule {
+		t.Error("Expected IsSubmodule to be true for a gitlink worktree")
+	}
+	if sub.Error != nil {
+		t.Errorf("Expected no error for a resolvable gitlink, got %v", sub.Error)
+	}
+	if sub.GitDir != filepath.Clean(realGitDir) {
+		t.Errorf("Expected GitDir %s, got %s", filepath.Clean(realGitDir), sub.GitDir)
+	}
+}
+
+func TestScanner_SubmoduleGitlinkBroken(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Point at a modules directory that was never created, the state left by a
+	// clone without --recurse-submodules.
+	writeGitlink(t, filepath.Join(tmpDir, "parent"), "sub", "../.git/modules/sub")
+
+	config := &types.Config{Workers: 1, Operation: types.OperationScan, Recursive: true}
+	repos, err := NewScanner(config).FindRepos(context.Background(), tmpDir, nil)
+	if err != nil {
+		t.Fatalf("FindRepos failed: %v", err)
+	}
+
+	var sub *types.GitRepo
+	for i := range repos {
+		if repos[i].Name == "sub" {
+			sub = &repos[i]
+		}
+	}
+	if sub == nil {
+		t.Fatal("Expected the submodule worktree to be discovered")
+	}
+
+	if !sub.IsSubmodule {
+		t.Error("Expected IsSubmodule to be true for a gitlink worktree")
+	}
+	if !errors.Is(sub.Error, types.ErrBrokenGitlink) {
+		t.Errorf("Expected ErrBrokenGitlink, got %v", sub.Error)
+	}
+	if sub.GitDir != "" {
+		t.Errorf("Expected empty GitDir for a broken gitlink, got %s", sub.GitDir)
+	}
+}
+
+func TestScanner_MalformedGitlinkIsReported(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	worktree := filepath.Join(tmpDir, "weird")
+	if err := os.MkdirAll(worktree, 0755); err != nil {
+		t.Fatalf("Failed to create worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("not a gitlink\n"), 0644); err != nil {
+		t.Fatalf("Failed to write .git file: %v", err)
+	}
+
+	config := &types.Config{Workers: 1, Operation: types.OperationScan, Recursive: true}
+	repos, err := NewScanner(config).FindRepos(context.Background(), tmpDir, nil)
+	if err != nil {
+		t.Fatalf("FindRepos failed: %v", err)
+	}
+
+	if len(repos) != 1 {
+		t.Fatalf("Expected 1 repo, got %d", len(repos))
+	}
+	if !errors.Is(repos[0].Error, types.ErrBrokenGitlink) {
+		t.Errorf("Expected ErrBrokenGitlink for a .git file without a gitdir marker, got %v", repos[0].Error)
 	}
 }

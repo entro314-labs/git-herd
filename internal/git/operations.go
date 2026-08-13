@@ -35,6 +35,13 @@ func (p *Processor) AnalyzeRepo(repo *types.GitRepo) {
 		repo.Duration = time.Since(start)
 	}()
 
+	// The scanner may have already diagnosed this repo (e.g. a dangling
+	// gitlink). Keep that specific error rather than replacing it with the
+	// generic open failure it would inevitably produce.
+	if repo.Error != nil {
+		return
+	}
+
 	gitRepo, err := gogit.PlainOpen(repo.Path)
 	if err != nil {
 		repo.Error = fmt.Errorf("failed to open repository: %w", err)
@@ -70,7 +77,7 @@ func (p *Processor) AnalyzeRepo(repo *types.GitRepo) {
 
 	status, err := worktree.Status()
 	if err != nil {
-		repo.Error = fmt.Errorf("failed to get status: %w", err)
+		repo.Error = fmt.Errorf("failed to get status: %w%s", err, invalidPathHint(err))
 		return
 	}
 
@@ -101,6 +108,18 @@ func (p *Processor) AnalyzeRepo(repo *types.GitRepo) {
 	}
 }
 
+// invalidPathHint returns a remediation suffix for status failures caused by a
+// path go-git rejects. The usual culprit on macOS is the "Icon\r" file Finder
+// writes for a custom folder icon: the trailing carriage return is a control
+// character, so the whole repository fails to report status. Without the hint
+// the raw error gives no indication that a single stray file is the cause.
+func invalidPathHint(err error) string {
+	if err == nil || !strings.Contains(err.Error(), "invalid path") {
+		return ""
+	}
+	return " (a file name contains a character git cannot handle; on macOS this is usually the Finder \"Icon\\r\" custom-icon file — remove it with: find . -name 'Icon?' -print -delete)"
+}
+
 // ProcessRepo performs the git operation on a single repository
 func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.GitRepo {
 	start := time.Now()
@@ -113,6 +132,18 @@ func (p *Processor) ProcessRepo(ctx context.Context, repo types.GitRepo) types.G
 
 	if err := repoCtx.Err(); err != nil {
 		repo.Error = classifyContextErr(err)
+		return repo
+	}
+
+	// Submodules are pinned to a commit by their parent. Pulling one on its own
+	// moves it off that commit and leaves the parent with a dirty gitlink, so
+	// they are excluded unless explicitly requested. Scan is read-only and
+	// always reports them.
+	if repo.IsSubmodule && !p.config.WithSubmodules && p.config.Operation != types.OperationScan {
+		p.AnalyzeRepo(&repo)
+		if repo.Error == nil {
+			repo.Error = fmt.Errorf("%w: submodule (use --with-submodules to include)", types.ErrRepoSkipped)
+		}
 		return repo
 	}
 
