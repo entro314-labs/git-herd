@@ -43,6 +43,10 @@ func initTestRepo(t *testing.T) string {
 
 	dir := t.TempDir()
 	gitCmd(t, dir, "init", "-q", "-b", "main")
+	// Pin line-ending conversion: the code under test runs git with the host's
+	// config, and Git for Windows defaults to core.autocrlf=true, which checks
+	// files out with CRLF and breaks byte-exact content assertions.
+	gitCmd(t, dir, "config", "core.autocrlf", "false")
 	writeFile(t, dir, "tracked.txt", "original\n")
 	gitCmd(t, dir, "add", ".")
 	gitCmd(t, dir, "commit", "-q", "-m", "init")
