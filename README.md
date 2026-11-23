@@ -315,7 +315,7 @@ git-herd provides detailed error reporting and handles common scenarios:
 ## Building from Source
 
 Requirements:
-- go 1.26 or later (tested with 1.25.x)
+- go 1.27.4 or later
 
 ```bash
 git clone https://github.com/entro314-labs/git-herd
